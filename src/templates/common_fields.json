@@ -1,0 +1,6 @@
+{
+  "agree_keywords": ["agree", "terms", "rules", "согласен", "правила", "accept", "privacy"],
+  "submit_keywords": ["register", "sign up", "create account", "зарегистрироваться", "submit", "join"],
+  "username_keywords": ["user", "login", "nick", "username", "логин", "handle"],
+  "email_keywords": ["email", "mail", "e-mail"]
+}

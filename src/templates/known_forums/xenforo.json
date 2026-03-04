@@ -1,0 +1,27 @@
+{
+  "name": "XenForo",
+  "domain": "xenforo.com",
+  "detect": {
+    "url_pattern": "register",
+    "meta_tags": [
+      {"name": "generator", "content": "XenForo"}
+    ],
+    "html_contains": ["xf-register"]
+  },
+  "registration_page": {
+    "url": "/register",
+    "form_selector": "form#register-form"
+  },
+  "fields": {
+    "username": "input[name='username']",
+    "email": "input[name='email']",
+    "password": "input[name='password']",
+    "confirm_password": "input[name='password_confirm']",
+    "agree_checkbox": "input[name='agree']",
+    "submit_button": "button[type='submit']",
+    "captcha_indicator": "iframe[src*='recaptcha']"
+  },
+  "custom_fields": [],
+  "success_indicators": ["thank you for registering", "account has been created"],
+  "error_indicators": ["username is already taken", "email already exists"]
+}

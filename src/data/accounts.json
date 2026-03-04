@@ -1,0 +1,12 @@
+[
+    {
+        "username": "testuser1",
+        "email": "test1@example.com",
+        "password": "TestPass123",
+        "proxy_id": 0,
+        "custom_fields": {},
+        "status": "pending",
+        "attempts": 0,
+        "last_attempt": null
+    }
+]

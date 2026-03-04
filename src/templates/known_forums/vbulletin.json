@@ -1,0 +1,27 @@
+{
+  "name": "vBulletin",
+  "domain": "vbulletin.com",
+  "detect": {
+    "url_pattern": "register",
+    "meta_tags": [
+      {"name": "generator", "content": "vBulletin"}
+    ],
+    "html_contains": ["vbulletin"]
+  },
+  "registration_page": {
+    "url": "/register.php",
+    "form_selector": "form#register"
+  },
+  "fields": {
+    "username": "input[name='username']",
+    "email": "input[name='email']",
+    "password": "input[name='password']",
+    "confirm_password": "input[name='password_confirm']",
+    "agree_checkbox": "input[name='agree']",
+    "submit_button": "input[type='submit']",
+    "captcha_indicator": "div.g-recaptcha"
+  },
+  "custom_fields": [],
+  "success_indicators": ["registration successful", "welcome to"],
+  "error_indicators": ["username is already in use", "email address is already registered"]
+}

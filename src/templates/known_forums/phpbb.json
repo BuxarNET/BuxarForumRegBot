@@ -1,0 +1,27 @@
+{
+  "name": "phpBB",
+  "domain": "phpbb.com",
+  "detect": {
+    "url_pattern": "ucp.php?mode=register",
+    "meta_tags": [
+      {"name": "generator", "content": "phpBB"}
+    ],
+    "html_contains": ["phpbb"]
+  },
+  "registration_page": {
+    "url": "/ucp.php?mode=register",
+    "form_selector": "form#register"
+  },
+  "fields": {
+    "username": "input[name='username']",
+    "email": "input[name='email']",
+    "password": "input[name='new_password']",
+    "confirm_password": "input[name='password_confirm']",
+    "agree_checkbox": "input[name='agreed']",
+    "submit_button": "input[type='submit'][name='submit']",
+    "captcha_indicator": null
+  },
+  "custom_fields": [],
+  "success_indicators": ["registration complete", "your account has been created"],
+  "error_indicators": ["username already exists", "email address is already registered"]
+}
