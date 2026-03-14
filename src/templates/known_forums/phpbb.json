@@ -1,27 +1,46 @@
 {
   "name": "phpBB",
   "domain": "phpbb.com",
+  "engine": "phpbb",
   "detect": {
-    "url_pattern": "ucp.php?mode=register",
+    "url_pattern": "profile.php?mode=register",
     "meta_tags": [
       {"name": "generator", "content": "phpBB"}
     ],
     "html_contains": ["phpbb"]
   },
   "registration_page": {
-    "url": "/ucp.php?mode=register",
-    "form_selector": "form#register"
+    "url": ["/ucp.php?mode=register"],
+    "form_selector": ["form#register"]
+  },
+  "agree_step": {
+    "checkboxes": [],
+    "submit_button": []
   },
   "fields": {
-    "username": "input[name='username']",
-    "email": "input[name='email']",
-    "password": "input[name='new_password']",
-    "confirm_password": "input[name='password_confirm']",
-    "agree_checkbox": "input[name='agreed']",
-    "submit_button": "input[type='submit'][name='submit']",
-    "captcha_indicator": null
+    "username": ["input[name='username']"],
+    "email": ["input[name='email']"],
+    "password": ["input[name='new_password']"],
+    "confirm_password": ["input[name='password_confirm']"],
+    "agree_checkbox": ["input[name='agreed']"],
+    "submit_button": ["input[type='submit'][name='submit']"],
+    "captcha_indicator": []
   },
   "custom_fields": [],
-  "success_indicators": ["registration complete", "your account has been created"],
-  "error_indicators": ["username already exists", "email address is already registered"]
+  "success_indicators": [
+    "registration complete",
+    "your account has been created",
+    "account created",
+    "check your email",
+    "activation link",
+    "confirmation email"
+  ],
+  "error_indicators": [
+    "username already exists",
+    "email address is already registered",
+    "already taken",
+    "already exists",
+    "taken",
+    "exists"
+  ]
 }

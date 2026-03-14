@@ -4,3 +4,28 @@
 /.venv/
 /.project
 /.pydevproject
+
+src/.env
+
+# Игнорировать логи
+logs/
+src/logs/*
+!src/logs/.gitkeep
+
+# Игнорировать содержимое data, но сохранить структуру
+src/data/*
+!src/data/.gitkeep
+!src/data/*.json  # если нужны json файлы
+
+# Игнорировать профили и скриншоты
+src/data/profiles/
+!src/data/profiles/.gitkeep
+src/data/screenshots/
+!src/data/screenshots/.gitkeep
+
+# Игнорировать известные форумы (если это временные/генерируемые файлы)
+#src/templates/known_forums/
+#!src/templates/known_forums/.gitkeep
+
+# Игнорировать устаневшие файлы
+*old

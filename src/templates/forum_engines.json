@@ -1,0 +1,49 @@
+{
+  "engines": [
+    {
+      "name": "phpbb",
+      "meta_generator": "phpBB",
+      "html_signs": ["phpbb"]
+    },
+    {
+      "name": "mybb",
+      "meta_generator": "MyBB",
+      "html_signs": ["powered by mybb", "mybb.com"]
+    },
+    {
+      "name": "smf",
+      "meta_generator": "Simple Machines Forum",
+      "html_signs": ["simplemachines", "powered by smf"]
+    },
+    {
+      "name": "vbulletin",
+      "meta_generator": "vBulletin",
+      "html_signs": ["vbulletin", "powered by vbulletin"]
+    },
+    {
+      "name": "xenforo",
+      "meta_generator": "XenForo",
+      "html_signs": ["xenforo", "powered by xenforo"]
+    },
+    {
+      "name": "invision",
+      "meta_generator": "IPS",
+      "html_signs": ["invisioncommunity", "powered by invision"]
+    },
+    {
+      "name": "discourse",
+      "meta_generator": null,
+      "html_signs": ["discourse-", "ember-application"]
+    },
+    {
+      "name": "fluxbb",
+      "meta_generator": null,
+      "html_signs": ["powered by fluxbb"]
+    },
+    {
+      "name": "punbb",
+      "meta_generator": null,
+      "html_signs": ["powered by punbb"]
+    }
+  ]
+}

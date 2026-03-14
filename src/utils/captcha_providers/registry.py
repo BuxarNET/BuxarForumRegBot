@@ -65,11 +65,13 @@ def _create_provider(provider_id: str, api_key: str | None) -> CaptchaProvider |
     from utils.captcha_providers.implementations.two_captcha import TwoCaptchaProvider
     from utils.captcha_providers.implementations.az_captcha import AZCaptchaProvider
     from utils.captcha_providers.implementations.cap_solver import CapSolverProvider
-    from utils.captcha_providers.implementations.true_captcha import TrueCaptchaProvider
-    from utils.captcha_providers.implementations.death_by_captcha import DeathByCaptchaProvider
-    from utils.captcha_providers.implementations.solve_captcha import SolveCaptchaProvider
-    from utils.captcha_providers.implementations.end_captcha import EndCaptchaProvider
     from utils.captcha_providers.implementations.manual import ManualProvider
+    from utils.captcha_providers.implementations._stubs import (
+        TrueCaptchaProvider,
+        DeathByCaptchaProvider,
+        SolveCaptchaProvider,
+        EndCaptchaProvider,
+    )
 
     mapping = {
         "2captcha": TwoCaptchaProvider,

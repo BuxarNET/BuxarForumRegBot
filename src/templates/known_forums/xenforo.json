@@ -1,6 +1,7 @@
 {
   "name": "XenForo",
   "domain": "xenforo.com",
+  "engine": "xenforo",
   "detect": {
     "url_pattern": "register",
     "meta_tags": [
@@ -9,19 +10,37 @@
     "html_contains": ["xf-register"]
   },
   "registration_page": {
-    "url": "/register",
-    "form_selector": "form#register-form"
+    "url": ["/register"],
+    "form_selector": ["form#register-form"]
+  },
+  "agree_step": {
+    "checkboxes": [],
+    "submit_button": []
   },
   "fields": {
-    "username": "input[name='username']",
-    "email": "input[name='email']",
-    "password": "input[name='password']",
-    "confirm_password": "input[name='password_confirm']",
-    "agree_checkbox": "input[name='agree']",
-    "submit_button": "button[type='submit']",
-    "captcha_indicator": "iframe[src*='recaptcha']"
+    "username": ["input[name='username']"],
+    "email": ["input[name='email']"],
+    "password": ["input[name='password']"],
+    "confirm_password": ["input[name='password_confirm']"],
+    "agree_checkbox": ["input[name='agree']"],
+    "submit_button": ["button[type='submit']"],
+    "captcha_indicator": ["iframe[src*='recaptcha']"]
   },
   "custom_fields": [],
-  "success_indicators": ["thank you for registering", "account has been created"],
-  "error_indicators": ["username is already taken", "email already exists"]
+  "success_indicators": [
+    "thank you for registering",
+    "account has been created",
+    "account created",
+    "check your email",
+    "activation link",
+    "confirmation email"
+  ],
+  "error_indicators": [
+    "username is already taken",
+    "email already exists",
+    "already taken",
+    "already exists",
+    "taken",
+    "exists"
+  ]
 }

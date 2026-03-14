@@ -116,7 +116,7 @@ class ManualProvider(CaptchaProvider):
         }})();
         """
         try:
-            await self._page.evaluate(js)
+            await self._page.execute_script(js)
         except Exception as e:
             logger.debug(f"Не удалось подсветить капчу: {e}")
 
@@ -156,7 +156,7 @@ class ManualProvider(CaptchaProvider):
                 continue
 
             try:
-                token = await self._page.evaluate(js)
+                token = await self._page.execute_script(js)
                 if token and len(token) > 10:
                     return token
             except Exception as e:

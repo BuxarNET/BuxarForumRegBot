@@ -1,0 +1,47 @@
+{
+  "name": "SMF",
+  "domain": "simplemachines.org",
+  "engine": "smf",
+  "detect": {
+    "url_pattern": "action=register",
+    "meta_tags": [
+      {"name": "generator", "content": "Simple Machines Forum"}
+    ],
+    "html_contains": ["simplemachines", "SMF"]
+  },
+  "registration_page": {
+    "url": ["/index.php?action=register"],
+    "form_selector": ["form#registration"]
+  },
+  "agree_step": {
+    "checkboxes": [],
+    "submit_button": []
+  },
+  "fields": {
+    "username": ["input[name='user']"],
+    "email": ["input[name='email']"],
+    "password": ["input[name='passwrd1']"],
+    "confirm_password": ["input[name='passwrd2']"],
+    "agree_checkbox": ["input[name='regagree']"],
+    "submit_button": ["input[type='submit'][name='regSubmit']"],
+    "captcha_indicator": []
+  },
+  "custom_fields": [],
+  "success_indicators": [
+    "registration successful",
+    "account created",
+    "welcome",
+    "check your email",
+    "activation link",
+    "confirmation email"
+  ],
+  "error_indicators": [
+    "username already exists",
+    "email already registered",
+    "that name is taken",
+    "already taken",
+    "already exists",
+    "taken",
+    "exists"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "forum2x2",
+  "domain": "forum2x2.ru",
+  "engine": "forum2x2.ru",
+  "registration_page": {
+    "url": [],
+    "form_selector": ["form"]
+  },
+  "agree_step": {
+    "checkboxes": [
+      "input[name='agreement']",
+      "input[name='privacy']"
+    ],
+    "submit_button": ["input[type='submit'].cgu-buttons"]
+  },
+  "fields": {
+    "username": ["input[name='username']"],
+    "email": ["input[name='email']"],
+    "password": ["input[name='password']"],
+    "confirm_password": [],
+    "agree_checkbox": [],
+    "submit_button": ["input[name='submit']"],
+    "captcha_indicator": []
+  },
+  "custom_fields": [],
+  "success_indicators": [
+    "активировать",
+    "активации",
+    "письмо",
+    "подтвердите регистрацию",
+    "спасибо за регистрацию",
+    "регистрация завершена",
+    "на вашу почту",
+    "отправлено письмо",
+    "проверьте email",
+    "вам выслано письмо",
+    "активационная ссылка",
+    "письмо с инструкцией",
+    "завершена регистрация",
+    "активацию учетной записи",
+    "подтверждение регистрации",
+    "письмо для активации"
+  ],
+  "error_indicators": [
+    "уже зарегистрирован", "занято", "ошибка", "already registered",
+    "already exists", "already taken", "username taken",
+    "email already", "invalid username", "invalid email",
+    "уже существует", "уже зарегистрирован", "существует пользователь",
+    "username already taken", "имя пользователя занято",
+    "пользователь с таким именем", "извините, пользователь",
+    "sorry, username", "taken", "exists"
+  ]
+}

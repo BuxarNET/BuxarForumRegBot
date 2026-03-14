@@ -20,7 +20,7 @@ class StoredAccount(TypedDict):
     email: str
     password: str
     proxy_id: int
-    custom_fields: dict[str, str]
+    custom_fields: dict[str, list[str] | None]
     status: str
     attempts: int
     last_attempt: str | None
@@ -176,18 +176,13 @@ class AccountManager:
     async def update_account_status(
         self,
         username: str,
-        status: str,
         reason: str | None = None,
         proxy: str | None = None,
     ) -> None:
-        """Обновляет статус аккаунта в accounts.json.
-
-        Увеличивает счётчик attempts, обновляет last_attempt.
-        Опционально сохраняет причину ошибки и использованный прокси.
+        """Обновляет last_attempt аккаунта в accounts.json.
 
         Args:
             username: Имя пользователя для поиска.
-            status: Новый статус (pending/registered/failed/banned).
             reason: Причина ошибки (опционально).
             proxy: Использованный прокси (опционально).
         """
@@ -196,29 +191,22 @@ class AccountManager:
 
         for account in accounts:
             if account.get("username") == username:
-                account["status"] = status
-                account["attempts"] = account.get("attempts", 0) + 1
                 account["last_attempt"] = datetime.now().isoformat(timespec="seconds")
-
-                if reason or proxy:
+                if reason:
                     account["last_error"] = {
                         "reason": reason,
                         "proxy_used": proxy,
                     }
-
                 updated = True
-                logger.info(
-                    f"Статус аккаунта обновлён: {username} → {status} "
-                    f"(попытка #{account['attempts']})"
-                )
+                logger.debug(f"Обновлён last_attempt для аккаунта: {username}")
                 break
 
         if not updated:
-            logger.warning(f"Аккаунт не найден для обновления статуса: {username}")
+            logger.warning(f"Аккаунт не найден для обновления: {username}")
             return
 
         await self._save_json(self.accounts_file, accounts)
-        self._accounts_cache = None  # инвалидируем кэш
+        self._accounts_cache = None
 
     async def export_failed_accounts(self, output_path: str | Path) -> int:
         """Экспортирует аккаунты со статусом failed или banned в JSON-файл.

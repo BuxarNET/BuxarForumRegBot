@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 import aiofiles
 from loguru import logger
-
+from pydoll.exceptions import PageLoadTimeout
+from utils.account_manager import AccountManager
 
 class MainOrchestrator:
     """Главный управляющий модуль системы массовой регистрации на форумах.
@@ -47,6 +49,9 @@ class MainOrchestrator:
             "captcha_failed": 0,
             "profiles_created": 0,
         }
+        self._account_manager = AccountManager(
+            accounts_file=self._config.get("ACCOUNTS_FILE", "data/accounts.json")
+        )
 
         # Активные браузеры для graceful shutdown
         self._active_browsers: list = []
@@ -223,6 +228,9 @@ class MainOrchestrator:
     async def _load_accounts(self) -> list[dict]:
         """Загружает список аккаунтов из accounts.json.
 
+        Поддерживает хранение пароля в переменных окружения.
+        Формат: "password": "name='ENV_VAR_NAME'"
+
         Returns:
             Список аккаунтов или пустой список при ошибке.
         """
@@ -234,7 +242,24 @@ class MainOrchestrator:
         try:
             async with aiofiles.open(accounts_file, encoding="utf-8") as f:
                 content = await f.read()
-            return json.loads(content)
+            accounts = json.loads(content)
+
+            # Подставляем пароли из переменных окружения
+            for account in accounts:
+                password = account.get("password", "")
+                match = re.match(r"name='(.+)'", str(password))
+                if match:
+                    env_name = match.group(1)
+                    env_value = os.environ.get(env_name, "")
+                    if env_value:
+                        account["password"] = env_value
+                        logger.debug(f"Пароль загружен из переменной окружения: {env_name}")
+                    else:
+                        logger.error(f"Переменная окружения не найдена: {env_name}")
+
+            # В конце _load_accounts перед return accounts
+            accounts = [a for a in accounts if a.get("status", "pending") == "pending"]
+            return accounts
         except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Ошибка загрузки аккаунтов: {e}")
             return []
@@ -301,23 +326,28 @@ class MainOrchestrator:
             Строка прокси или None если не найден.
         """
         proxy_id = user.get("proxy_id")
+        
+        # proxy_id: null — явно указано работать без прокси
         if proxy_id is None:
             if self._config.get("REQUIRE_PROXY_PER_USER", True):
-                logger.error(f"proxy_id не задан для {user['username']}")
-                return None
-            return None
-
+                logger.warning(
+                    f"proxy_id не задан для {user['username']}, "
+                    f"работаем без прокси"
+                )
+            return None  # ← раньше здесь была ошибка и пропуск пользователя
+        
+        # proxy_id задан — берём из списка
         if not proxy_manager.proxies:
             logger.error("Список прокси пуст")
             return None
-
+    
         if proxy_id >= len(proxy_manager.proxies):
             logger.error(
                 f"proxy_id={proxy_id} выходит за пределы списка "
                 f"({len(proxy_manager.proxies)} прокси)"
             )
             return None
-
+    
         return proxy_manager.proxies[proxy_id]
 
     # =========================================================================
@@ -359,8 +389,8 @@ class MainOrchestrator:
         """
         from controllers.browser_controller import BrowserController
         from controllers.registration_controller import RegistrationController
-        from utils.template_manager import TemplateManager
-        from utils.selector_finder import SelectorFinder
+        from template_manager import TemplateManager
+        from selector_finder import SelectorFinder
         from utils.captcha_helper import CaptchaExtensionHelper
 
         safe_username = self._sanitize_filename(username)
@@ -371,15 +401,23 @@ class MainOrchestrator:
         bad_file = results_dir / f"results_bad_{safe_username}.txt"
 
         # Прокси пользователя
-        proxy = self._get_proxy_for_user(user_data, proxy_manager)
-        if proxy is None and self._config.get("REQUIRE_PROXY_PER_USER", True):
-            logger.error(f"User {username}: нет прокси, пропускаем")
-            return {"username": username, "success": 0, "failed": len(forum_queue)}
+        require_proxy = self._config.get("REQUIRE_PROXY_PER_USER", True)
+        if require_proxy:
+            # Глобально включено — смотрим профиль пользователя
+            proxy = self._get_proxy_for_user(user_data, proxy_manager)
+        else:
+            # Глобально выключено — игнорируем proxy_id в профиле
+            proxy = None
+            logger.debug(f"User {username}: прокси отключены глобально")
+
 
         # Профиль браузера
         profiles_dir = Path(self._config.get("PROFILES_DIR", "data/profiles"))
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        profile_path = profiles_dir / f"{safe_username}_{timestamp}"
+        profile_path = profiles_dir / safe_username
+        if profile_path.exists():
+            logger.info(f"User {username}: используется существующий профиль")
+        else:
+            logger.info(f"User {username}: создан новый профиль")
 
         user_stats = {
             "username": username,
@@ -407,7 +445,7 @@ class MainOrchestrator:
                     "WINDOW_TITLE_FORMAT", "{username} | {forum} | {status}"
                 ).format(username=username, forum="init", status="running")
                 try:
-                    await page.evaluate(f"document.title = '{title}'")
+                    await page.execute_script(f"document.title = '{title}'")
                 except Exception:
                     pass
 
@@ -415,9 +453,9 @@ class MainOrchestrator:
             reg_config = {
                 "manual_captcha_timeout": self._config.get("MANUAL_CAPTCHA_TIMEOUT", 300),
                 "manual_field_fill_timeout": self._config.get("MANUAL_FIELD_FILL_TIMEOUT", 120),
-                "find_registration_page_timeout": self._config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60),
                 "max_retries": self._config.get("MAX_REGISTRATION_RETRIES", 3),
                 "manual_fallback": True,
+                "TEST_MODE": self._config.get("TEST_MODE", False),
             }
 
             # Captcha helper (stats callback обновляет общую статистику)
@@ -426,8 +464,10 @@ class MainOrchestrator:
                 stats_callback=self._on_captcha_stats,
             )
 
-            template_manager = TemplateManager()
-            selector_finder = SelectorFinder(page)
+            template_manager = TemplateManager(
+                accounts_file=self._config.get("ACCOUNTS_FILE", "data/accounts.json")
+            )
+            selector_finder = SelectorFinder(page=page, template_manager=template_manager)
 
             reg_controller = RegistrationController(
                 browser_controller=browser,
@@ -524,21 +564,66 @@ class MainOrchestrator:
                 title = title_fmt.format(
                     username=username, forum=forum_url, status="registering"
                 )
-                await page.evaluate(f"document.title = '{title}'")
+                await page.execute_script(f"document.title = '{title}'")
             except Exception:
                 pass
 
         attempt = 0
         result = None
+        tab = None
+        tab_count = 0  # счётчик открытых вкладок — защита от закрытия единственной
 
         while attempt < max_retries:
             try:
-                # Открываем новый таб для каждой попытки
-                tab = await browser.new_tab()
-                await browser.goto(forum_url)
+                if self._config.get("TAB_PER_REGISTRATION", True):
+                    tab = await browser.new_tab()
+                    tab_count += 1
 
+                # Сначала обновляем page во всех контроллерах — потом навигация
+                target_page = await browser.get_current_tab()
+                if not target_page:
+                    raise RuntimeError("Нет активной вкладки для регистрации")
+                reg_controller.page = target_page
+                reg_controller.selector_finder.page = target_page
+
+                await browser.goto(
+                    forum_url,
+                    page_load_wait=self._config.get("PAGE_LOAD_WAIT", 5),
+                    load_timeout=self._config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60),
+                )
+
+                # Определяем движок один раз — страница уже загружена
+                try:
+                    # Предпочитаем нативный метод, если он есть в твоей версии Pydoll
+                    page_source = await target_page.get_content()
+                except (AttributeError, NotImplementedError):
+                    # Fallback через JS, если get_content() отсутствует
+                    resp = await target_page.execute_script(
+                        "return document.documentElement.outerHTML;"
+                    )
+                    page_source = resp.get("result", {}).get("result", {}).get("value", "")
+
+                if not page_source:
+                    logger.warning(f"Не удалось получить исходный код страницы {forum_url}")
+                    page_source = ""  # или можно return / continue в зависимости от логики
+
+                engine_name, template = await reg_controller.template_manager.detect_engine(
+                    url=forum_url,
+                    page_source=page_source,
+                )
+
+                logger.info(
+                    f"Форум {forum_url}: определён движок '{engine_name}', "
+                    f"шаблон {'найден' if template else 'будет создан или эвристика'}"
+                )              
+
+                # Запускаем регистрацию, передавая engine_name и template
                 result = await asyncio.wait_for(
-                    reg_controller.register(user_data),
+                    reg_controller.register(
+                        user_data,
+                        engine_name=engine_name,
+                        template=template,
+                    ),
                     timeout=self._config.get("TAB_TIMEOUT_SECONDS", 300),
                 )
 
@@ -552,6 +637,33 @@ class MainOrchestrator:
                     "form_data": user_data,
                     "message": "Registration timeout",
                 }
+
+            except PageLoadTimeout:
+                logger.warning(f"User {username} @ {forum_url}: таймаут загрузки страницы")
+                result = {
+                    "success": False,
+                    "reason": "timeout",
+                    "template_used": None,
+                    "screenshot": None,
+                    "form_data": user_data,
+                    "message": "Page load timeout",
+                }
+
+            except RuntimeError as e:
+                # page_unavailable — брошен из browser_controller.goto()
+                if "page_unavailable" in str(e):
+                    logger.warning(f"User {username} @ {forum_url}: {e}")
+                    result = {
+                        "success": False,
+                        "reason": "page_unavailable",
+                        "template_used": None,
+                        "screenshot": None,
+                        "form_data": user_data,
+                        "message": str(e),
+                    }
+                else:
+                    raise
+
             except Exception as e:
                 logger.error(
                     f"User {username} @ {forum_url}: исключение: {type(e).__name__}: {e}"
@@ -574,12 +686,20 @@ class MainOrchestrator:
                         pass
 
             finally:
-                # Закрываем таб, cookies сохраняются в профиле
-                if self._config.get("CLOSE_TAB_AFTER_REGISTRATION", True):
-                    try:
-                        pass  # pydoll закрывает таб через browser.new_tab()
-                    except Exception:
-                        pass
+                # Закрываем вкладку только если:
+                # - конфиг разрешает CLOSE_TAB_AFTER_REGISTRATION
+                # - TAB_PER_REGISTRATION включён
+                # - вкладка была открыта в этой итерации
+                # - это не единственная вкладка (tab_count > 1 защищает от закрытия последней)
+                if (
+                    self._config.get("CLOSE_TAB_AFTER_REGISTRATION", True)
+                    and self._config.get("TAB_PER_REGISTRATION", True)
+                    and tab is not None
+                    and tab_count > 1
+                ):
+                    await browser.close_tab(tab)
+                    tab_count -= 1
+                    tab = None
 
             if result and result.get("success"):
                 break
@@ -608,14 +728,17 @@ class MainOrchestrator:
             user_stats["forums_registered"].append(forum_url)
             self._stats["success"] += 1
             logger.info(f"User {username} registered on {forum_url}")
+            await self._account_manager.update_account_status(username=username)
         else:
             reason = (result.get("reason") or "unknown") if result else "unknown"
             self._write_result(bad_file, forum_url, [reason, timestamp])
             user_stats["failed"] += 1
             self._stats["failed"] += 1
             logger.warning(f"User {username} failed on {forum_url}: {reason}")
-
-        self._stats["processed"] += 1
+            await self._account_manager.update_account_status(
+                username=username,
+                reason=reason,
+            )
 
     # =========================================================================
     # Отчёт и статистика

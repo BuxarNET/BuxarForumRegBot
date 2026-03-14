@@ -136,6 +136,7 @@ async def check_environment() -> bool:
     accounts_file = Path("data/accounts.json")
     if accounts_file.exists():
         try:
+            
             import json
             accounts = json.loads(accounts_file.read_text(encoding="utf-8"))
             logger.info(f"  ✓ Аккаунтов загружено: {len(accounts)}")

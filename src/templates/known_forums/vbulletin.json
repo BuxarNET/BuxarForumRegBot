@@ -1,6 +1,7 @@
 {
   "name": "vBulletin",
   "domain": "vbulletin.com",
+  "engine": "vbulletin",
   "detect": {
     "url_pattern": "register",
     "meta_tags": [
@@ -9,19 +10,37 @@
     "html_contains": ["vbulletin"]
   },
   "registration_page": {
-    "url": "/register.php",
-    "form_selector": "form#register"
+    "url": ["/register.php"],
+    "form_selector": ["form#register"]
+  },
+  "agree_step": {
+    "checkboxes": [],
+    "submit_button": []
   },
   "fields": {
-    "username": "input[name='username']",
-    "email": "input[name='email']",
-    "password": "input[name='password']",
-    "confirm_password": "input[name='password_confirm']",
-    "agree_checkbox": "input[name='agree']",
-    "submit_button": "input[type='submit']",
-    "captcha_indicator": "div.g-recaptcha"
+    "username": ["input[name='username']"],
+    "email": ["input[name='email']"],
+    "password": ["input[name='password']"],
+    "confirm_password": ["input[name='password_confirm']"],
+    "agree_checkbox": ["input[name='agree']"],
+    "submit_button": ["input[type='submit']"],
+    "captcha_indicator": ["div.g-recaptcha"]
   },
   "custom_fields": [],
-  "success_indicators": ["registration successful", "welcome to"],
-  "error_indicators": ["username is already in use", "email address is already registered"]
+  "success_indicators": [
+    "registration successful",
+    "welcome to",
+    "account created",
+    "check your email",
+    "activation link",
+    "confirmation email"
+  ],
+  "error_indicators": [
+    "username is already in use",
+    "email address is already registered",
+    "already taken",
+    "already exists",
+    "taken",
+    "exists"
+  ]
 }

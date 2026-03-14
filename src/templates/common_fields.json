@@ -1,6 +1,78 @@
 {
-  "agree_keywords": ["agree", "terms", "rules", "согласен", "правила", "accept", "privacy"],
-  "submit_keywords": ["register", "sign up", "create account", "зарегистрироваться", "submit", "join"],
-  "username_keywords": ["user", "login", "nick", "username", "логин", "handle"],
-  "email_keywords": ["email", "mail", "e-mail"]
+  "agree_keywords": [
+    "agree", "terms", "rules", "accept", "privacy", "policy", "consent",
+    "соглас", "правил", "условия", "принимаю", "принять", "политик",
+    "tos", "toc", "license", "лицензи", "оферт", "gdpr"
+  ],
+  "submit_keywords": [
+    "register", "sign up", "create account", "submit", "join", "continue", "next", "proceed",
+    "зарегистрироваться", "зарегистрир", "продолжить", "далее", "отправить", "подтвердить",
+    "signup", "enroll", "complete", "finish", "create", "начать", "вперёд", "ок", "согласен", "Создать аккаунт"
+  ],
+  "username_keywords": [
+    "user", "login", "nick", "username", "handle", "псевдоним",
+    "логин", "никнейм", "пользователь", "юзер", "ник"
+  ],
+  "email_keywords": [
+    "email", "mail", "e-mail", "почта", "эл.почта", "электронная", "емейл"
+  ],
+  "confirm_email_keywords": [
+    "confirm", "repeat", "retype", "verify", "re-email", "re-mail",
+    "email2", "mail2", "подтвержд", "повтори", "повторите",
+    "проверка", "второй", "emailconf", "confirmemail"
+  ],
+  "password_keywords": [
+    "pass", "password", "pwd", "пароль", "парол", "passwd"
+  ],
+  "confirm_password_keywords": [
+    "confirm", "repeat", "retype", "verify", "re-pass", "re-password",
+    "подтвержд", "повтори", "повторите", "проверка", "password2",
+    "pass2", "passwd2", "пароль2", "passconf", "confirmpass"
+  ],
+  "checkbox_skip_keywords": [
+    "newsletter", "subscribe", "рассылка", "новости", "подписка", "реклама",
+    "marketing", "promo", "offer", "notification", "уведомлен"
+  ],
+  "city_keywords": [
+    "city", "town", "location", "город", "населённый пункт", "место", "откуда", "регион"
+  ],
+  "birthdate_keywords": [
+    "birth", "birthday", "dob", "born", "дата рождения", "день рождения", "возраст",
+    "bday", "birthdate", "birth_date", "date_of_birth"
+  ],
+  "gender_keywords": [
+    "gender", "sex", "пол"
+  ],
+  "firstname_keywords": [
+    "first", "firstname", "fname", "first_name", "имя", "name"
+  ],
+  "lastname_keywords": [
+    "last", "lastname", "lname", "фамилия", "surname", "last_name", "family"
+  ],
+  "phone_keywords": [
+    "phone", "tel", "mobile", "cellular", "телефон", "мобильный", "номер"
+  ],
+  "website_keywords": [
+    "website", "site", "url", "homepage", "сайт", "веб"
+  ],
+  "country_keywords": [
+    "country", "nation", "страна", "государство", "регион", "regional", "региональн", "ctl_regselect"
+  ],
+  "captcha_keywords": [
+    "captcha", "recaptcha", "hcaptcha", "security", "код", "проверка", "антибот"
+  ],
+  "skip_form_action_keywords": [
+    "login", "signin", "sign-in", "logon", "войти",
+    "search", "поиск", "find", "query", "cart", "checkout"
+  ],
+  "skip_form_name_keywords": [
+    "login", "search", "logon", "signin", "cart"
+  ],
+  "timezone_keywords": [
+    "timezone", "time_zone", "ctl_tzselect", "часовой пояс", "часовой", "пояс", "utc", "gmt"
+  ],
+  "one_time_field_keywords": [
+    "captcha", "imagestring", "image_string", "seccode",
+    "answer", "question", "secret", "код", "code", "q_and_a"
+  ]
 }

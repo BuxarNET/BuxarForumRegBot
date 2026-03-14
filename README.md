@@ -161,16 +161,19 @@ ENDCAPTCHA_API_KEY=ваш_ключ
 **`src/data/accounts.json`** — список аккаунтов:
 ```json
 [
-    {
-        "username": "myuser1",
-        "email": "user1@example.com",
-        "password": "StrongPass123",
-        "proxy_id": 0,
-        "custom_fields": {},
-        "status": "pending",
-        "attempts": 0,
-        "last_attempt": null
-    }
+     {
+        "username": "user",            // Логин для регистрации на форуме
+        "email": "user@user.com",      // Email для регистрации
+        "password": "user_pass",       // Пароль (мин. 8 символов, буквы+цифры)
+        "proxy_id": 0,                 // Индекс прокси из proxies.txt (0 = первая строка, 1 = вторая и т.д.)
+        "custom_fields": {             // Дополнительные поля если форум их требует
+            "referral": "6456",        // Например реферальный код
+            "city": "user_city"        // Или город — зависит от форума
+        },
+       "status": "pending",           // Статус: pending / done / failed — не меняй вручную
+       "attempts": 0,                 // Счётчик попыток — не меняй вручную
+       "last_attempt": null           // Дата последней попытки — не меняй вручную
+     }
 ]
 ```
 

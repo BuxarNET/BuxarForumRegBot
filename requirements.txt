@@ -5,3 +5,4 @@ lxml>=5.0.0
 python-dotenv>=1.0.0
 loguru>=0.7.0
 pytest>=7.0.0
+tldextract>=5.1.0

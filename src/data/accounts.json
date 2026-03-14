@@ -1,12 +1,79 @@
 [
-    {
-        "username": "testuser1",
-        "email": "test1@example.com",
-        "password": "TestPass123",
-        "proxy_id": 0,
-        "custom_fields": {},
-        "status": "pending",
-        "attempts": 0,
-        "last_attempt": null
-    }
+  {
+    "username": "buxarnet",
+    "email": "buxarnet@gmail.com",
+    "password": "name='USER_BUXARNET'",
+    "proxy_id": null,
+    "custom_fields": {
+      "referral": null,
+      "city": [
+        "Псков"
+      ],
+      "country": [
+        "Россия"
+      ],
+      "timezone": [
+        "Москва"
+      ],
+      "gender": [
+        "Мужской",
+        "Male"
+      ],
+      "firstname": [
+        "Иван"
+      ],
+      "lastname": [
+        "Петров"
+      ],
+      "birthdate": [
+        "01.01.1990"
+      ],
+      "phone": null,
+      "website": null,
+      "occupation": null,
+      "interests": null,
+      "about": null,
+      "icq": null,
+      "skype": null,
+      "telegram": null,
+      "subscriptionmethod": [
+        "3"
+      ]
+    },
+    "status": "pending",
+    "attempts": 0,
+    "last_attempt": "2026-03-14T12:19:06",
+    "last_error": null
+  },
+  {
+    "username": "MOYMANANA",
+    "email": "gdgfdg@gmail.com",
+    "password": "name='USER_MOYMANANA'",
+    "proxy_id": null,
+    "custom_fields": {
+      "referral": null,
+      "city": [
+        "Москва"
+      ],
+      "country": null,
+      "timezone": null,
+      "gender": null,
+      "firstname": null,
+      "lastname": null,
+      "birthdate": null,
+      "phone": null,
+      "website": null,
+      "occupation": null,
+      "interests": null,
+      "about": null,
+      "icq": null,
+      "skype": null,
+      "telegram": null,
+      "subscriptionmethod": null
+    },
+    "status": "disabled",
+    "attempts": 0,
+    "last_attempt": null,
+    "last_error": null
+  }
 ]

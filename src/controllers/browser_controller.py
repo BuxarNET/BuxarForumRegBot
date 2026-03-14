@@ -9,7 +9,7 @@ from loguru import logger
 from pydoll.browser.chromium import Chrome
 from pydoll.browser.options import ChromiumOptions
 from pydoll.constants import Key
-from pydoll.exceptions import ArgumentAlreadyExistsInOptions
+from pydoll.exceptions import ArgumentAlreadyExistsInOptions, PageLoadTimeout
 
 
 class BrowserController:
@@ -121,14 +121,108 @@ class BrowserController:
         self._current_tab = tab
         logger.debug("Создана новая вкладка")
         return tab
+    
+    async def close_tab(self, tab=None) -> None:
+        """Закрывает вкладку браузера.
+
+        Args:
+            tab: вкладка для закрытия. Если None — закрывает текущую.
+        """
+        target = tab or self._current_tab
+        if not target:
+            logger.debug("Нет активной вкладки для закрытия")
+            return
+        try:
+            await target.close()
+            logger.debug("Вкладка закрыта")
+        except Exception as e:
+            logger.warning(f"Не удалось закрыть вкладку: {e}")
 
     # ===== Навигация =====
 
-    async def goto(self, url: str):
-        """Переходит по URL в текущей вкладке."""
-        await self._current_tab.go_to(url)
+    async def goto(
+        self,
+        url: str,
+        page_load_wait: float = 5.0,
+        load_timeout: float = 60.0,
+    ) -> None:
+        """Переходит по URL в текущей вкладке.
+
+        Ждёт загрузки страницы не более load_timeout секунд.
+        При успехе делает паузу page_load_wait секунд для медленных сайтов.
+        При не-200 статусе делает одну перезагрузку и ждёт ещё load_timeout секунд.
+        При повторном не-200 бросает RuntimeError("page_unavailable HTTP код") —
+            для обработки retry в оркестраторе.
+        При таймауте навигации бросает PageLoadTimeout.
+        При ошибке чтения статуса (None) продолжает как при 200 —
+            None означает SPA/pushState или ограничения JS, не является ошибкой.
+
+        Args:
+            url: адрес страницы.
+            page_load_wait: пауза после успешной загрузки (сек).
+            load_timeout: таймаут навигации и ожидания после reload (сек).
+        """
+        try:
+            await self._current_tab.go_to(url, timeout=int(load_timeout))
+        except PageLoadTimeout:
+            logger.warning(f"Таймаут загрузки страницы ({load_timeout}с): {url}")
+            raise
+
         logger.info(f"Перешли на {url}")
 
+        # Пауза только при успешной навигации — не в finally
+        if page_load_wait > 0:
+            logger.debug(f"Пауза {page_load_wait}с после загрузки страницы")
+            await asyncio.sleep(page_load_wait)
+
+        # Читаем HTTP статус
+        http_status = await self._get_http_status()
+        logger.debug(f"HTTP статус страницы: {http_status}, url={url}")
+
+        # None — статус не удалось прочитать (SPA, pushState, ограничения JS) → продолжаем
+        if http_status is None or http_status == 200:
+            return
+
+        # Статус не 200 — одна перезагрузка в той же вкладке
+        logger.warning(
+            f"Страница вернула статус {http_status} — перезагрузка, "
+            f"ждём {load_timeout}с: {url}"
+        )
+        try:
+            await self._current_tab.go_to(url, timeout=int(load_timeout))
+            await asyncio.sleep(page_load_wait)
+        except PageLoadTimeout:
+            logger.warning(f"Таймаут повторной загрузки ({load_timeout}с): {url}")
+            raise
+
+        # Повторная проверка статуса
+        http_status = await self._get_http_status()
+        logger.debug(f"HTTP статус после перезагрузки: {http_status}, url={url}")
+
+        if http_status is not None and http_status != 200:
+            logger.error(
+                f"Форум недоступен после перезагрузки (статус={http_status}): {url}"
+            )
+            raise RuntimeError(f"page_unavailable HTTP {http_status}")
+    
+    async def _get_http_status(self) -> int | None:
+        """Читает HTTP статус текущей страницы через Navigation Timing API.
+
+        Returns:
+            HTTP статус (int) или None если прочитать не удалось
+            (SPA, pushState, ограничения JS на странице).
+        """
+        try:
+            response = await self._current_tab.execute_script(
+                "return window.performance.getEntriesByType('navigation')[0]"
+                "?.responseStatus ?? null"
+            )
+            value = response.get("result", {}).get("result", {}).get("value")
+            return int(value) if value is not None else None
+        except Exception as e:
+            logger.debug(f"Не удалось прочитать HTTP статус: {e}")
+            return None
+        
     async def back(self):
         """Возврат на предыдущую страницу."""
         await self._current_tab.go_back()
@@ -184,16 +278,23 @@ class BrowserController:
         logger.debug(f"Введён текст: {text[:20]}{'...' if len(text) > 20 else ''}")
 
     async def human_click(self, element_or_selector: Union[Any, str]):
-        """Кликает по элементу с реалистичным движением мыши."""
+        """Кликает по элементу с реалистичным движением мыши.
+        
+        Перед кликом выполняет скролл к элементу — предотвращает
+        ElementNotInteractable если элемент вне viewport.
+        """
         if isinstance(element_or_selector, str):
             element = await self.wait_for_element(element_or_selector)
         else:
             element = element_or_selector
-
+        
+        # Скролл к элементу перед кликом
+        await self.scroll_to_element(element)
+        
         await asyncio.sleep(0.3)
         await element.click()
         logger.debug("Клик выполнен")
-
+        
     async def press_key(self, element_or_selector: Union[Any, str], key: Key):
         """
         Нажимает клавишу на элементе.
@@ -235,14 +336,17 @@ class BrowserController:
         Ожидает решения капчи на текущей странице.
         """
         if manual_mode or not self._extension_loaded:
-            logger.info("Решите капчу в открытом браузере вручную, затем нажмите Enter...")
+            print("\n" + "=" * 60)
+            print("ТРЕБУЕТСЯ РУЧНОЙ ВВОД: КАПЧА")
+            print("Решите капчу в браузере, затем нажмите Enter.")
+            print("=" * 60)
             try:
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, input, "Нажмите Enter после решения капчи: ")
-                logger.info("Ручное подтверждение получено.")
+                await loop.run_in_executor(None, input, ">>> ")
+                logger.info("Ручное подтверждение капчи получено.")
                 return True
             except Exception as e:
-                logger.error(f"Ошибка при ожидании ручного ввода: {e}")
+                logger.error(f"Ошибка при ожидании ручного ввода капчи: {e}")
                 return False
 
         # Автоматический режим с расширением
@@ -278,6 +382,7 @@ class BrowserController:
             if timeout is not None and elapsed > timeout:
                 logger.warning(f"Таймаут ожидания решения капчи ({timeout} с).")
                 return False
+            
     async def wait_for_manual_field_fill(
         self,
         timeout: float = 120,

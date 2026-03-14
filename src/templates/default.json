@@ -1,0 +1,46 @@
+{
+  "name": "unknown",
+  "domain": null,
+  "engine": null,
+  "detect": {
+    "url_pattern": null,
+    "html_contains": [],
+    "meta_tags": []
+  },
+  "registration_page": {
+    "url": [],
+    "form_selector": []
+  },
+  "agree_step": {
+    "checkboxes": [],
+    "submit_button": []
+  },
+  "fields": {
+    "username": [],
+    "email": [],
+    "password": [],
+    "confirm_password": [],
+    "agree_checkbox": [],
+    "submit_button": [],
+    "captcha_indicator": []
+  },
+  "custom_fields": [],
+  "success_indicators": [
+    "активировать", "активации", "письмо", "подтвердите регистрацию",
+    "спасибо за регистрацию", "регистрация завершена", "на вашу почту",
+    "отправлено письмо", "проверьте email", "вам выслано письмо",
+    "активационная ссылка", "завершена регистрация",
+    "registration complete", "account created", "check your email",
+    "verify your email", "welcome", "thank you for registering",
+    "activation link", "confirmation email"
+  ],
+  "error_indicators": [
+    "уже зарегистрирован", "занято", "ошибка", "already registered",
+    "already exists", "already taken", "username taken",
+    "email already", "invalid username", "invalid email",
+    "уже существует", "существует пользователь",
+    "username already taken", "имя пользователя занято",
+    "пользователь с таким именем", "извините, пользователь",
+    "sorry, username", "taken", "exists"
+  ]
+}
