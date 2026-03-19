@@ -1259,18 +1259,55 @@ class RegistrationController:
 
             # Определяем тип элемента
             tag = (element.get_attribute("tagName") or "").lower()
+            el_type = (element.get_attribute("type") or "").lower()
+            el_name = (element.get_attribute("name") or "")
+            el_id = (element.get_attribute("id") or "")
+            current_val = (element.get_attribute("value") or "").strip()
+            logger.debug(
+                f"[ОТЛАДКА] поле='{field_name}' "
+                f"tag={tag} type={el_type} name={el_name} id={el_id} "
+                f"current_val='{current_val}' len={len(current_val)}"
+            )
 
             # --- Обработка <select> ---
             if tag == "select":
                 return await self._try_fill_select(element, selector, value, field_name)
 
             # Защита от перезаполнения (get_attribute — синхронный)
-            current_val = (element.get_attribute("value") or "").strip()
             if current_val and len(current_val) > 3:
                 logger.debug(f"Поле '{field_name}' уже содержит значение — пропускаем")
                 return "already_filled"
 
+            # Проверяем видимость через JS
+            try:
+                resp = await self.page.execute_script(
+                    f"var el = document.querySelector('{selector}');"
+                    f"if (!el) return 'not_found_in_dom';"
+                    f"var s = window.getComputedStyle(el);"
+                    f"return s.display + '|' + s.visibility + '|' + s.opacity "
+                    f"+ '|' + el.offsetWidth + 'x' + el.offsetHeight;"
+                )
+                vis = resp.get("result", {}).get("result", {}).get("value", "unknown")
+                logger.debug(f"[ОТЛАДКА] видимость '{field_name}': {vis}")
+            except Exception as ve:
+                logger.debug(f"[ОТЛАДКА] ошибка проверки видимости: {ve}")
+
             await self.browser.human_type(selector, value)
+
+            # Проверяем значение после ввода через JS
+            try:
+                resp2 = await self.page.execute_script(
+                    f"var el = document.querySelector('{selector}');"
+                    f"return el ? el.value : 'element_not_found';"
+                )
+                val_after = resp2.get("result", {}).get("result", {}).get("value", "unknown")
+                logger.debug(
+                    f"[ОТЛАДКА] значение '{field_name}' после ввода: "
+                    f"длина={len(str(val_after))} пусто={val_after == ''}"
+                )
+            except Exception as ae:
+                logger.debug(f"[ОТЛАДКА] ошибка проверки после ввода: {ae}")
+
             logger.info(f"Поле '{field_name}' успешно заполнено: {selector}")
             return "filled"
 

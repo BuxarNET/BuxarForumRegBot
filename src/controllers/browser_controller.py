@@ -273,10 +273,11 @@ class BrowserController:
         else:
             element = element_or_selector
 
+        await element.click()
         await asyncio.sleep(0.2)
         await element.type_text(text)
         logger.debug(f"Введён текст: {text[:20]}{'...' if len(text) > 20 else ''}")
-
+        
     async def human_click(self, element_or_selector: Union[Any, str]):
         """Кликает по элементу с реалистичным движением мыши.
         
