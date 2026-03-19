@@ -866,12 +866,12 @@ class RegistrationController:
                     "Все варианты URL из шаблона не сработали — "
                     "переходим к эвристике"
                 )
-                logger.info(f"Переход на страницу регистрации через шаблон: {full_url}")
-                await self.browser.goto(full_url)
-                return True
-            # url: null — ищем ссылку эвристически даже при наличии шаблона
-    
-        # Эвристика — ищем ссылку на регистрацию
+                
+        # Эвристика запускается в трёх случаях:
+        # 1. template = None — движок не определён, шаблона нет
+        # 2. reg_url = [] — шаблон есть, но URL регистрации не указан
+        # 3. Все варианты URL из шаблона не сработали (недоступны)
+        # Ищем ссылку на регистрацию на текущей странице форума
         logger.info("Ищем ссылку на регистрацию...")
         reg_link = await self.selector_finder.find_registration_link()
         if reg_link:
@@ -1287,15 +1287,7 @@ class RegistrationController:
 
             # Определяем тип элемента
             tag = (element.get_attribute("tagName") or "").lower()
-            el_type = (element.get_attribute("type") or "").lower()
-            el_name = (element.get_attribute("name") or "")
-            el_id = (element.get_attribute("id") or "")
             current_val = (element.get_attribute("value") or "").strip()
-            logger.debug(
-                f"[ОТЛАДКА] поле='{field_name}' "
-                f"tag={tag} type={el_type} name={el_name} id={el_id} "
-                f"current_val='{current_val}' len={len(current_val)}"
-            )
 
             # --- Обработка <select> ---
             if tag == "select":
@@ -1306,35 +1298,7 @@ class RegistrationController:
                 logger.debug(f"Поле '{field_name}' уже содержит значение — пропускаем")
                 return "already_filled"
 
-            # Проверяем видимость через JS
-            try:
-                resp = await self.page.execute_script(
-                    f"var el = document.querySelector('{selector}');"
-                    f"if (!el) return 'not_found_in_dom';"
-                    f"var s = window.getComputedStyle(el);"
-                    f"return s.display + '|' + s.visibility + '|' + s.opacity "
-                    f"+ '|' + el.offsetWidth + 'x' + el.offsetHeight;"
-                )
-                vis = resp.get("result", {}).get("result", {}).get("value", "unknown")
-                logger.debug(f"[ОТЛАДКА] видимость '{field_name}': {vis}")
-            except Exception as ve:
-                logger.debug(f"[ОТЛАДКА] ошибка проверки видимости: {ve}")
-
             await self.browser.human_type(selector, value)
-
-            # Проверяем значение после ввода через JS
-            try:
-                resp2 = await self.page.execute_script(
-                    f"var el = document.querySelector('{selector}');"
-                    f"return el ? el.value : 'element_not_found';"
-                )
-                val_after = resp2.get("result", {}).get("result", {}).get("value", "unknown")
-                logger.debug(
-                    f"[ОТЛАДКА] значение '{field_name}' после ввода: "
-                    f"длина={len(str(val_after))} пусто={val_after == ''}"
-                )
-            except Exception as ae:
-                logger.debug(f"[ОТЛАДКА] ошибка проверки после ввода: {ae}")
 
             logger.info(f"Поле '{field_name}' успешно заполнено: {selector}")
             return "filled"
