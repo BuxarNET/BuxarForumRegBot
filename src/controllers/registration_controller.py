@@ -4,6 +4,7 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import TypedDict, NotRequired
 
 from loguru import logger
@@ -426,7 +427,7 @@ class RegistrationController:
             }
 
         except Exception as e:
-            logger.error(f"Ошибка регистрации пользователя {account_data['username']}: {type(e).__name__}: {e}")
+            logger.exception(f"Ошибка регистрации пользователя {account_data['username']}: {type(e).__name__}: {e}")
             screenshot_path = await self._take_screenshot(
                 prefix="exception",
                 username=account_data.get("username")
@@ -835,10 +836,37 @@ class RegistrationController:
         if template:
             reg_page = template.get("registration_page", {})
             reg_url = reg_page.get("url")
-            if reg_url:
+            if isinstance(reg_url, list) and reg_url:
                 current_url = await self.page.current_url
-                full_url = current_url.rstrip("/") + reg_url
-                logger.info(f"Navigating to registration page via template: {full_url}")
+                parsed = urlparse(current_url)
+                # Обрезаем последний сегмент пути (файл/страница)
+                # /forum_vb/showthread.php → /forum_vb
+                # /index.php              → (пусто)
+                base_path = parsed.path.rsplit("/", 1)[0]
+                base_url = f"{parsed.scheme}://{parsed.netloc}{base_path}"
+                for idx, url_variant in enumerate(reg_url):
+                    variant_clean = url_variant.lstrip("/")
+                    full_url = f"{base_url}/{variant_clean}" if variant_clean else base_url
+                    logger.debug(
+                        f"Пробуем вариант URL регистрации "
+                        f"[{idx + 1}/{len(reg_url)}]: {full_url}"
+                    )
+                    try:
+                        await self.browser.goto(full_url)
+                        logger.info(
+                            f"Перешли на страницу регистрации по шаблону: {full_url}"
+                        )
+                        return True
+                    except Exception as e:
+                        logger.debug(
+                            f"Вариант [{idx + 1}/{len(reg_url)}] недоступен "
+                            f"({type(e).__name__}): {full_url}"
+                        )
+                logger.debug(
+                    "Все варианты URL из шаблона не сработали — "
+                    "переходим к эвристике"
+                )
+                logger.info(f"Переход на страницу регистрации через шаблон: {full_url}")
                 await self.browser.goto(full_url)
                 return True
             # url: null — ищем ссылку эвристически даже при наличии шаблона
