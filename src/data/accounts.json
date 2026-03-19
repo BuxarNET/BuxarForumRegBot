@@ -38,13 +38,23 @@
       "telegram": null,
       "subscriptionmethod": [
         "3"
-      ]
+      ],
+      "register_vv[code]": [
+        "TDMBKG"
+      ],
+      "lang": [
+        "1"
+      ],
+      "tz_date": [
+        "1"
+      ],
+      "pf_profile_fio": []
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-03-19T17:50:29",
+    "last_attempt": "2026-03-19T21:34:06",
     "last_error": {
-      "reason": "max_steps_exceeded",
+      "reason": "page_unavailable",
       "proxy_used": null
     }
   },

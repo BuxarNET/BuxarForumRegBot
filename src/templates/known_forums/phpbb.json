@@ -5,26 +5,75 @@
   "detect": {
     "url_pattern": "profile.php?mode=register",
     "meta_tags": [
-      {"name": "generator", "content": "phpBB"}
+      {
+        "name": "generator",
+        "content": "phpBB"
+      }
     ],
-    "html_contains": ["phpbb"]
+    "html_contains": [
+      "phpbb"
+    ]
   },
   "registration_page": {
-    "url": ["/ucp.php?mode=register"],
-    "form_selector": ["form#register"]
+    "url": [
+      "/ucp.php?mode=register"
+    ],
+    "form_selector": [
+      "form#register",
+      "#register"
+    ]
   },
   "agree_step": {
-    "checkboxes": [],
+    "checkboxes": [
+      "input[name='agreed']"
+    ],
     "submit_button": []
   },
   "fields": {
-    "username": ["input[name='username']"],
-    "email": ["input[name='email']"],
-    "password": ["input[name='new_password']"],
-    "confirm_password": ["input[name='password_confirm']"],
-    "agree_checkbox": ["input[name='agreed']"],
-    "submit_button": ["input[type='submit'][name='submit']"],
-    "captcha_indicator": []
+    "username": [
+      "input[name='username']",
+      "#username"
+    ],
+    "email": [
+      "input[name='email']",
+      "#email"
+    ],
+    "password": [
+      "input[name='new_password']",
+      "#new_password"
+    ],
+    "confirm_password": [
+      "input[name='password_confirm']",
+      "#password_confirm"
+    ],
+    "agree_checkbox": [
+      "input[name='agreed']"
+    ],
+    "submit_button": [
+      "input[type='submit'][name='submit']"
+    ],
+    "captcha_indicator": [],
+    "lang": [
+      "#lang"
+    ],
+    "tz_date": [
+      "#tz_date"
+    ],
+    "timezone": [
+      "#timezone_copy"
+    ],
+    "username_label": [
+      "Имя пользователя:"
+    ],
+    "email_label": [
+      "Адрес email:"
+    ],
+    "password_label": [
+      "Пароль:"
+    ],
+    "confirm_password_label": [
+      "Подтвердите новый пароль:"
+    ]
   },
   "custom_fields": [],
   "success_indicators": [
@@ -33,13 +82,43 @@
     "account created",
     "check your email",
     "activation link",
-    "confirmation email"
+    "confirmation email",
+    "активировать",
+    "активации",
+    "письмо",
+    "подтвердите регистрацию",
+    "спасибо за регистрацию",
+    "регистрация завершена",
+    "на вашу почту",
+    "отправлено письмо",
+    "проверьте email",
+    "вам выслано письмо",
+    "активационная ссылка",
+    "завершена регистрация",
+    "verify your email",
+    "welcome",
+    "thank you for registering"
   ],
   "error_indicators": [
     "username already exists",
     "email address is already registered",
     "already taken",
     "already exists",
+    "уже зарегистрирован",
+    "занято",
+    "ошибка",
+    "already registered",
+    "username taken",
+    "email already",
+    "invalid username",
+    "invalid email",
+    "уже существует",
+    "существует пользователь",
+    "username already taken",
+    "имя пользователя занято",
+    "пользователь с таким именем",
+    "извините, пользователь",
+    "sorry, username",
     "taken",
     "exists"
   ]

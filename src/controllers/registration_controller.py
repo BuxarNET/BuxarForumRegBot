@@ -1204,13 +1204,26 @@ class RegistrationController:
                     logger.warning(f"Чекбокс согласия '{agree_selector}' не найден в DOM — пропускаем")
                     skipped_fields.append("agree_checkbox")
                 else:
-                    already_checked = element.get_attribute("checked") is not None
-                    if already_checked:
-                        logger.info(f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик")
+                    # Проверяем что элемент является полем ввода а не кнопкой
+                    _input_types = {
+                        "checkbox", "radio", "text", "email", "password",
+                        "number", "tel", "url", "date", "time", "file",
+                        "range", "color", "search"
+                    }
+                    el_type = (element.get_attribute("type") or "text").lower()
+                    if el_type not in _input_types:
+                        logger.debug(
+                            f"Элемент agree_checkbox имеет type='{el_type}' — "
+                            f"это кнопка, пропускаем шаг 2"
+                        )
                     else:
-                        await self.browser.human_click(agree_selector)
-                        logger.info(f"Чекбокс согласия отмечен: {agree_selector}")
-                    filled_fields.append("agree_checkbox")  # элемент найден — успех
+                        already_checked = element.get_attribute("checked") is not None
+                        if already_checked:
+                            logger.info(f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик")
+                        else:
+                            await self.browser.human_click(agree_selector)
+                            logger.info(f"Чекбокс согласия отмечен: {agree_selector}")
+                        filled_fields.append("agree_checkbox")
                     if engine_name:
                         await self.template_manager.update_template(
                             engine_name=engine_name,

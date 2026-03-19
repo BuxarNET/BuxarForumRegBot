@@ -5,42 +5,110 @@
   "detect": {
     "url_pattern": "action=register",
     "meta_tags": [
-      {"name": "generator", "content": "Simple Machines Forum"}
+      {
+        "name": "generator",
+        "content": "Simple Machines Forum"
+      }
     ],
-    "html_contains": ["simplemachines", "SMF"]
+    "html_contains": [
+      "simplemachines",
+      "SMF"
+    ]
   },
   "registration_page": {
-    "url": ["/index.php?action=register"],
-    "form_selector": ["form#registration"]
+    "url": [
+      "/index.php?action=register"
+    ],
+    "form_selector": [
+      "form#registration",
+      "#registration"
+    ]
   },
   "agree_step": {
     "checkboxes": [],
     "submit_button": []
   },
   "fields": {
-    "username": ["input[name='user']"],
-    "email": ["input[name='email']"],
-    "password": ["input[name='passwrd1']"],
-    "confirm_password": ["input[name='passwrd2']"],
-    "agree_checkbox": ["input[name='regagree']"],
-    "submit_button": ["input[type='submit'][name='regSubmit']"],
-    "captcha_indicator": []
+    "username": [
+      "input[name='user']",
+      "#smf_autov_username"
+    ],
+    "email": [
+      "input[name='email']",
+      "#smf_autov_reserve1"
+    ],
+    "password": [
+      "input[name='passwrd1']",
+      "#smf_autov_pwmain"
+    ],
+    "confirm_password": [
+      "input[name='passwrd2']",
+      "#smf_autov_pwverify"
+    ],
+    "agree_checkbox": [
+      "input[name='regagree']"
+    ],
+    "submit_button": [
+      "input[type='submit'][name='regSubmit']"
+    ],
+    "captcha_indicator": [],
+    "username_label": [
+      "Имя пользователя:"
+    ],
+    "email_label": [
+      "Имейл:"
+    ],
+    "password_label": [
+      "Пароль:"
+    ],
+    "confirm_password_label": [
+      "Подтвердите пароль:"
+    ]
   },
   "custom_fields": [],
   "success_indicators": [
-    "registration successful",
+    "registration complete",
+    "your account has been created",
     "account created",
-    "welcome",
     "check your email",
     "activation link",
-    "confirmation email"
+    "confirmation email",
+    "активировать",
+    "активации",
+    "письмо",
+    "подтвердите регистрацию",
+    "спасибо за регистрацию",
+    "регистрация завершена",
+    "на вашу почту",
+    "отправлено письмо",
+    "проверьте email",
+    "вам выслано письмо",
+    "активационная ссылка",
+    "завершена регистрация",
+    "verify your email",
+    "welcome",
+    "thank you for registering"
   ],
   "error_indicators": [
     "username already exists",
-    "email already registered",
-    "that name is taken",
+    "email address is already registered",
     "already taken",
     "already exists",
+    "уже зарегистрирован",
+    "занято",
+    "ошибка",
+    "already registered",
+    "username taken",
+    "email already",
+    "invalid username",
+    "invalid email",
+    "уже существует",
+    "существует пользователь",
+    "username already taken",
+    "имя пользователя занято",
+    "пользователь с таким именем",
+    "извините, пользователь",
+    "sorry, username",
     "taken",
     "exists"
   ]
