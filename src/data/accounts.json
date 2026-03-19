@@ -42,8 +42,11 @@
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-03-14T12:19:06",
-    "last_error": null
+    "last_attempt": "2026-03-19T17:50:29",
+    "last_error": {
+      "reason": "max_steps_exceeded",
+      "proxy_used": null
+    }
   },
   {
     "username": "MOYMANANA",

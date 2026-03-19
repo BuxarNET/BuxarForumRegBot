@@ -268,6 +268,8 @@ class MainOrchestrator:
         """Определяет индекс форума с которого нужно продолжить работу.
 
         Читает последнюю строку results_ok_{username}.txt и ищет URL в списке форумов.
+        Затем пропускает форумы из results_bad_{username}.txt начиная с найденного
+        индекса — до первого форума которого нет в bad-списке.
 
         Args:
             username: имя пользователя.
@@ -280,27 +282,57 @@ class MainOrchestrator:
         results_dir = Path(self._config.get("RESULTS_DIR", "data"))
         ok_file = results_dir / f"results_ok_{safe_name}.txt"
 
-        if not ok_file.exists() or ok_file.stat().st_size == 0:
-            return 0
+        # Определяем start_index по results_ok
+        start_index = 0
+        if ok_file.exists() and ok_file.stat().st_size > 0:
+            try:
+                async with aiofiles.open(ok_file, encoding="utf-8") as f:
+                    content = await f.read()
+                urls = [
+                    u for u in
+                    (self._parse_file_line(l) for l in content.splitlines())
+                    if u
+                ]
+                if urls:
+                    last_url = urls[-1]
+                    if last_url in all_forums:
+                        start_index = all_forums.index(last_url) + 1
+            except OSError as e:
+                logger.warning(f"Не удалось прочитать файл ok для {username}: {e}")
 
-        try:
-            async with aiofiles.open(ok_file, encoding="utf-8") as f:
-                content = await f.read()
+        # Читаем results_bad — собираем множество URL
+        bad_urls: set[str] = set()
+        bad_file = results_dir / f"results_bad_{safe_name}.txt"
+        if bad_file.exists() and bad_file.stat().st_size > 0:
+            try:
+                async with aiofiles.open(bad_file, encoding="utf-8") as f:
+                    content = await f.read()
+                bad_urls = {
+                    u for u in
+                    (self._parse_file_line(l) for l in content.splitlines())
+                    if u
+                }
+            except OSError as e:
+                logger.warning(f"Не удалось прочитать файл bad для {username}: {e}")
 
-            lines = [l.strip() for l in content.splitlines() if l.strip()]
-            if not lines:
-                return 0
+        # Пропускаем форумы из bad начиная с start_index
+        if bad_urls:
+            while start_index < len(all_forums):
+                if all_forums[start_index] not in bad_urls:
+                    break
+                logger.debug(
+                    f"User {username}: пропускаем форум из bad-списка: "
+                    f"{all_forums[start_index]}"
+                )
+                start_index += 1
 
-            last_url = lines[-1].split(" ", 1)[0]
+            if start_index >= len(all_forums):
+                logger.warning(
+                    f"User {username}: все форумы обработаны или находятся в bad-списке"
+                )
 
-            if last_url in all_forums:
-                idx = all_forums.index(last_url)
-                return idx + 1
-
-        except OSError as e:
-            logger.warning(f"Не удалось прочитать файл resume для {username}: {e}")
-
-        return 0
+        logger.debug(f"User {username}: начинаем с индекса {start_index}")
+        return start_index
 
     async def _init_proxy_manager(self):
         """Инициализирует и загружает ProxyManager.
