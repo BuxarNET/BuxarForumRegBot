@@ -228,7 +228,55 @@ class RegistrationController:
                         "form_data": account_data
                     }
 
-                await asyncio.sleep(2)
+                # Ждём загрузки страницы после submit и проверяем наличие контента.
+                # Если страница не загрузилась — выполняем refresh с увеличенным ожиданием.
+                # Перенесено сюда из _check_result чтобы _check_block_changed
+                # тоже получал уже загруженную страницу.
+                page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
+                page_reload_timeout: float = self.config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60.0)
+                min_content_length: int = self.config.get("MIN_PAGE_CONTENT_LENGTH", 300)
+
+                await asyncio.sleep(page_load_wait)
+
+                async def _get_body_html_inline() -> str:
+                    """Возвращает полный innerHTML body — для проверки загрузки страницы."""
+                    try:
+                        resp = await self.page.execute_script(
+                            "return document.body ? document.body.innerHTML : ''"
+                        )
+                        return resp.get("result", {}).get("result", {}).get("value") or ""
+                    except Exception as e:
+                        logger.error(f"Не удалось получить innerHTML body: {e}")
+                        return ""
+
+                full_html: str = await _get_body_html_inline()
+                logger.debug(
+                    f"Размер body.innerHTML после submit: {len(full_html)} симв."
+                )
+
+                if len(full_html) <= min_content_length:
+                    logger.warning(
+                        f"Страница не загрузилась после submit "
+                        f"({len(full_html)} симв., порог={min_content_length}) — "
+                        f"выполняем refresh и ожидаем {page_reload_timeout}с"
+                    )
+                    try:
+                        await self.browser.refresh()
+                        logger.info(
+                            f"Refresh выполнен, ожидаем {page_reload_timeout}с"
+                        )
+                        await asyncio.sleep(page_reload_timeout)
+                        full_html = await _get_body_html_inline()
+                        logger.debug(
+                            f"Размер body.innerHTML после refresh: {len(full_html)} симв."
+                        )
+                        if len(full_html) <= min_content_length:
+                            logger.error(
+                                f"Страница не загрузилась после refresh "
+                                f"({len(full_html)} симв.) — продолжаем без гарантии"
+                            )
+                    except Exception as e:
+                        logger.error(f"Ошибка refresh страницы: {e}")
 
                 # Правило 1 — проверяем изменился ли блок после submit
                 block_changed, has_any_fields, new_blocks = await self._check_block_changed(
@@ -1360,6 +1408,83 @@ class RegistrationController:
             tag = (element.get_attribute("tagName") or "").lower()
             current_val = (element.get_attribute("value") or "").strip()
 
+            # Проверка видимости и доступности через JS —
+            # покрывает все способы скрытия: disabled, aria-disabled,
+            # display:none, visibility:hidden, opacity:0, pointer-events:none,
+            # скрытие через родителя или CSS-класс (getComputedStyle)
+            sel_js = json.dumps(selector)
+            try:
+                vis_response = await self.page.execute_script(f"""
+                    (function() {{
+                        var el = document.querySelector({sel_js});
+                        if (!el) return JSON.stringify({{visible: false, reason: 'not_found'}});
+
+                        // el.disabled учитывает и атрибут и состояние DOM
+                        if (el.disabled)
+                            return JSON.stringify({{visible: false, reason: 'disabled'}});
+
+                        if ((el.getAttribute('aria-disabled') || '').toLowerCase() === 'true')
+                            return JSON.stringify({{visible: false, reason: 'aria_disabled'}});
+
+                        // getComputedStyle — ловит скрытие через любой CSS
+                        // включая классы и родителей
+                        var style = window.getComputedStyle(el);
+                        if (style.display === 'none')
+                            return JSON.stringify({{visible: false, reason: 'display_none'}});
+                        if (style.visibility === 'hidden')
+                            return JSON.stringify({{visible: false, reason: 'visibility_hidden'}});
+                        if (style.opacity === '0')
+                            return JSON.stringify({{visible: false, reason: 'opacity_zero'}});
+                        if (style.pointerEvents === 'none')
+                            return JSON.stringify({{visible: false, reason: 'pointer_events_none'}});
+
+                        // getBoundingClientRect — ловит скрытие через нулевые размеры
+                        var rect = el.getBoundingClientRect();
+                        if (rect.width === 0 && rect.height === 0)
+                            return JSON.stringify({{visible: false, reason: 'zero_size'}});
+
+                        return JSON.stringify({{visible: true, reason: 'ok'}});
+                    }})()
+                """)
+                vis_raw: str = (
+                    vis_response.get("result", {}).get("result", {}).get("value") or ""
+                )
+                if not vis_raw:
+                    logger.warning(
+                        f"Пустой ответ проверки видимости '{field_name}' "
+                        f"({selector}) — считаем недоступным"
+                    )
+                    return "not_visible"
+                try:
+                    vis_data: dict = json.loads(vis_raw)
+                except (json.JSONDecodeError, TypeError) as json_err:
+                    logger.warning(
+                        f"Невалидный JSON от проверки видимости '{field_name}' "
+                        f"({selector}): {json_err} — считаем недоступным"
+                    )
+                    return "not_visible"
+                is_visible: bool = vis_data.get("visible", False)
+                vis_reason: str = vis_data.get("reason", "unknown")
+                if not is_visible:
+                    logger.debug(
+                        f"Поле '{field_name}' недоступно ({vis_reason}) — "
+                        f"пропускаем: {selector}"
+                    )
+                    return "not_visible"
+
+                logger.debug(
+                    f"Поле '{field_name}' доступно ({vis_reason}) — "
+                    f"продолжаем заполнение: {selector}"
+                )
+
+            except Exception as vis_err:
+                # Если JS-проверка упала — логируем и продолжаем
+                # чтобы не блокировать заполнение из-за ошибки диагностики
+                logger.debug(
+                    f"Не удалось проверить видимость '{field_name}' "
+                    f"({selector}): {vis_err} — продолжаем"
+                )
+
             # --- Обработка <select> ---
             if tag == "select":
                 return await self._try_fill_select(element, selector, value, field_name)
@@ -2228,19 +2353,11 @@ class RegistrationController:
         Returns:
             Кортеж (успех, причина_ошибки).
         """
-        # Таймауты и пороги из конфига
-        page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
-        page_reload_timeout: float = self.config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60.0)
-        min_content_length: int = self.config.get("MIN_PAGE_CONTENT_LENGTH", 300)
-
-        await asyncio.sleep(page_load_wait)
         logger.info("=== Проверка результата регистрации ===")
 
         # Проверка результата регистрации:
-        # 1. Даём странице время на рендер (page_load_wait)
-        # 2. Проверяем наличие контента по body.innerHTML (> min_content_length)
-        # 3. При недостаточном контенте — один refresh + длительное ожидание
-        # 4. Анализ индикаторов проводим по видимому тексту (JS-фильтрация)
+        # Пауза и проверка загрузки страницы выполнены в register() после submit.
+        # Здесь только извлечение видимого текста и анализ индикаторов.
         # Случай «контент есть, но индикаторы не найдены» — штатное поведение (no_indicators).
 
         # Смягчённая проверка видимости — только для _check_result.
@@ -2324,52 +2441,7 @@ class RegistrationController:
                 logger.error(f"Не удалось получить видимый текст страницы: {e}")
                 return ""
 
-        async def _get_full_html() -> str:
-            """Возвращает полный innerHTML body — для проверки наличия контента."""
-            try:
-                response = await self.page.execute_script(
-                    "return document.body ? document.body.innerHTML : ''"
-                )
-                return response.get("result", {}).get("result", {}).get("value") or ""
-            except Exception as e:
-                logger.error(f"Не удалось получить innerHTML body: {e}")
-                return ""
-
-        # Шаг 1: проверяем наличие контента по полному HTML
-        full_html: str = await _get_full_html()
-        logger.debug(f"Размер body.innerHTML: {len(full_html)} симв.")
-        
-        # ДИАГНОСТИКА: форсируем перезагрузку всегда чтобы проверить влияние ожидания
-        #if True:  # TODO: убрать после диагностики, вернуть: len(full_html) <= min_content_length
-
-        if len(full_html) <= min_content_length:
-            logger.warning(
-                f"Контент страницы пустой или недостаточен "
-                f"({len(full_html)} симв., порог={min_content_length}) — "
-                f"выполняем refresh и ожидаем {page_reload_timeout}с"
-            )
-            try:
-                await self.browser.refresh()
-                logger.info(f"Refresh выполнен, ожидаем {page_reload_timeout}с")
-                await asyncio.sleep(page_reload_timeout)
-                full_html = await _get_full_html()
-                logger.debug(
-                    f"Размер body.innerHTML после refresh: {len(full_html)} симв."
-                )
-                if len(full_html) <= min_content_length:
-                    logger.error(
-                        f"Контент не получен после refresh "
-                        f"({len(full_html)} симв.) — page_source_error"
-                    )
-                    return False, "page_source_error"
-                logger.info(
-                    f"Контент получен после refresh ({len(full_html)} симв.)"
-                )
-            except Exception as e:
-                logger.error(f"Ошибка refresh страницы: {e}")
-                return False, "page_source_error"
-
-        # Шаг 2: получаем видимый текст для анализа индикаторов
+        # Получаем видимый текст для анализа индикаторов
         visible_text: str = await _get_visible_text()
         visible_text_lower: str = visible_text.lower()
         logger.debug(
