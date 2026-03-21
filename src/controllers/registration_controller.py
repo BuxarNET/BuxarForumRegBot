@@ -1064,6 +1064,7 @@ class RegistrationController:
 
             # Накапливаем опции select если несколько селекторов
             last_select_options: list[str] = []
+            not_visible_count: int = 0
 
             for sel in selectors_list:
                 raw = await self._try_fill_element(sel, value, field_name)
@@ -1079,14 +1080,32 @@ class RegistrationController:
                     logger.debug(f"Поле '{field_name}' уже заполнено — пропускаем")
                     break
                 elif fill_status == "not_visible":
-                    logger.debug(f"Поле '{field_name}' невидимо ({sel}) — пробуем следующий селектор")
+                    not_visible_count += 1
+                    logger.debug(
+                        f"Поле '{field_name}' скрыто/отключено ({sel}) — "
+                        f"пробуем следующий селектор"
+                    )
                     continue
                 else:
-                    logger.debug(f"Поле '{field_name}' не найдено ({sel}) — пробуем следующий селектор")
+                    logger.debug(
+                        f"Поле '{field_name}' не найдено ({sel}) — "
+                        f"пробуем следующий селектор"
+                    )
 
             if not field_filled:
-                # Все селекторы не сработали — запрашиваем ручной ввод (однократно)
-                logger.warning(f"Не удалось заполнить поле '{field_name}' автоматически — запрашиваем ручной ввод")
+                # Все селекторы недоступны (disabled/скрыты) — молча пропускаем
+                if not_visible_count == len(selectors_list):
+                    logger.debug(
+                        f"Поле '{field_name}' недоступно во всех селекторах — "
+                        f"пропускаем без ручного ввода"
+                    )
+                    skipped_fields.append(field_name)
+                    continue  # ← не переходим к ручному вводу
+                # Иначе — селекторы не сработали по другой причине, запрашиваем ручной ввод
+                logger.warning(
+                    f"Не удалось заполнить поле '{field_name}' автоматически — "
+                    f"запрашиваем ручной ввод"
+                )
                 manual_value = await self._ask_manual_input(
                     field_name=field_name,
                     selector_hint=selector if isinstance(selector, str) else selectors_list[0] if selectors_list else "",

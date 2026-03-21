@@ -20,7 +20,8 @@
       "/login/"
     ],
     "form_selector": [
-      "form#register-form"
+      "form#register-form",
+      "#pageLogin"
     ]
   },
   "register_step": {
@@ -41,10 +42,16 @@
     ],
     "password": [
       "input[name='password']",
-      "#ctrl_pageLogin_password"
+      "#ctrl_pageLogin_password",
+      "#ctrl_eb141216267ee54391095376e5c5fa40",
+      "#ctrl_ad72e79d392243f69bf0f7e1d38b837d"
     ],
     "confirm_password": [
-      "input[name='password_confirm']"
+      "input[name='password_confirm']",
+      "#ctrl_996bd4e13eb24a2be11ea7fb1f6078e1",
+      "#ctrl_af2c7a21b9b83d4037ccefe05c6b3c54",
+      "#ctrl_6fe2d76f203f5d251fb639eba4e3a4af",
+      "#ctrl_7f996cc8f816930ffc726a4e9238a273"
     ],
     "agree_checkbox": [
       "input[name='agree']"
@@ -54,6 +61,18 @@
     ],
     "captcha_indicator": [
       "iframe[src*='recaptcha']"
+    ],
+    "register_radio": [
+      "#ctrl_pageLogin_not_registered"
+    ],
+    "register_radio_label": [
+      "Нет, зарегистрироваться сейчас."
+    ],
+    "email_label": [
+      "Ваше имя или e-mail:"
+    ],
+    "birthdate": [
+      "input[name='dob_month']"
     ]
   },
   "custom_fields": [],
