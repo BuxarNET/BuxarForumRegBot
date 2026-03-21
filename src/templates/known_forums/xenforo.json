@@ -5,26 +5,56 @@
   "detect": {
     "url_pattern": "register",
     "meta_tags": [
-      {"name": "generator", "content": "XenForo"}
+      {
+        "name": "generator",
+        "content": "XenForo"
+      }
     ],
-    "html_contains": ["xf-register"]
+    "html_contains": [
+      "xf-register"
+    ]
   },
   "registration_page": {
-    "url": ["/register"],
-    "form_selector": ["form#register-form"]
+    "url": [
+      "/register",
+      "/login/"
+    ],
+    "form_selector": [
+      "form#register-form"
+    ]
+  },
+  "register_step": {
+    "radio_selector": "input[name='register'][value='1']",
+    "radio_value": "1"
   },
   "agree_step": {
     "checkboxes": [],
     "submit_button": []
   },
   "fields": {
-    "username": ["input[name='username']"],
-    "email": ["input[name='email']"],
-    "password": ["input[name='password']"],
-    "confirm_password": ["input[name='password_confirm']"],
-    "agree_checkbox": ["input[name='agree']"],
-    "submit_button": ["button[type='submit']"],
-    "captcha_indicator": ["iframe[src*='recaptcha']"]
+    "username": [
+      "input[name='username']"
+    ],
+    "email": [
+      "input[name='email']",
+      "#ctrl_pageLogin_login"
+    ],
+    "password": [
+      "input[name='password']",
+      "#ctrl_pageLogin_password"
+    ],
+    "confirm_password": [
+      "input[name='password_confirm']"
+    ],
+    "agree_checkbox": [
+      "input[name='agree']"
+    ],
+    "submit_button": [
+      "button[type='submit']"
+    ],
+    "captcha_indicator": [
+      "iframe[src*='recaptcha']"
+    ]
   },
   "custom_fields": [],
   "success_indicators": [

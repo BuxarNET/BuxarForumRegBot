@@ -2228,82 +2228,154 @@ class RegistrationController:
         Returns:
             Кортеж (успех, причина_ошибки).
         """
-        await asyncio.sleep(3)
+        # Таймауты и пороги из конфига
+        page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
+        page_reload_timeout: float = self.config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60.0)
+        min_content_length: int = self.config.get("MIN_PAGE_CONTENT_LENGTH", 300)
+
+        await asyncio.sleep(page_load_wait)
         logger.info("=== Проверка результата регистрации ===")
 
-        # Получаем HTML страницы
-        # Получаем текст только видимых элементов основной области страницы
-        try:
-            response = await self.page.execute_script("""
-                (function() {
-                    var SKIP_TAGS = ['script','style','noscript','head',
-                                     'header','nav','footer','aside'];
-                    var SKIP_CLASSES = ['header','footer','nav','sidebar',
-                                        'menu','navigation','breadcrumb'];
-                    var SKIP_INPUTS = ['input','textarea','select'];
+        # Проверка результата регистрации:
+        # 1. Даём странице время на рендер (page_load_wait)
+        # 2. Проверяем наличие контента по body.innerHTML (> min_content_length)
+        # 3. При недостаточном контенте — один refresh + длительное ожидание
+        # 4. Анализ индикаторов проводим по видимому тексту (JS-фильтрация)
+        # Случай «контент есть, но индикаторы не найдены» — штатное поведение (no_indicators).
 
-                    function isVisible(el) {
-                        var style = window.getComputedStyle(el);
-                        // opacity:'0' — элемент полностью прозрачен, считаем скрытым
-                        return (
-                            style.display !== 'none' &&
-                            style.visibility !== 'hidden' &&
-                            style.opacity !== '0' &&
-                            el.getAttribute('aria-hidden') !== 'true'
-                        );
+        # Смягчённая проверка видимости — только для _check_result.
+        # Убраны проверки opacity и aria-hidden: анимированные/прозрачные элементы
+        # могут содержать индикаторы успеха/ошибки регистрации.
+        # Изменение изолировано — SelectorFinder использует строгую проверку.
+        _extract_text_js: str = """
+            (function() {
+                var SKIP_TAGS = ['script','style','noscript','head',
+                                 'header','nav','footer','aside'];
+                var SKIP_CLASSES = ['header','footer','nav','sidebar',
+                                    'menu','navigation','breadcrumb'];
+
+                function isPotentiallyVisible(el) {
+                    if (!el.getBoundingClientRect) return true;
+                    var style = window.getComputedStyle(el);
+                    // Проверяем только жёсткое скрытие — opacity и aria-hidden
+                    // намеренно игнорируем: элемент может быть в процессе анимации
+                    return style.display !== 'none' && style.visibility !== 'hidden';
+                }
+
+                function shouldSkip(el) {
+                    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+                    if (SKIP_TAGS.indexOf(tag) > -1) return true;
+                    var classes = (el.className || '').toLowerCase().split(/\s+/);
+                    var id = (el.id || '').toLowerCase();
+                    for (var i = 0; i < SKIP_CLASSES.length; i++) {
+                        if (classes.indexOf(SKIP_CLASSES[i]) > -1) return true;
+                        if (id === SKIP_CLASSES[i]) return true;
                     }
+                    return false;
+                }
 
-                    function shouldSkip(el) {
-                        var tag = el.tagName ? el.tagName.toLowerCase() : '';
-                        if (SKIP_TAGS.indexOf(tag) > -1) return true;
-                        if (SKIP_INPUTS.indexOf(tag) > -1) return true;
-                        // Точное совпадение по словам className и id
-                        var classes = (el.className || '').toLowerCase().split(/\s+/);
-                        var id = (el.id || '').toLowerCase();
-                        for (var i = 0; i < SKIP_CLASSES.length; i++) {
-                            if (classes.indexOf(SKIP_CLASSES[i]) > -1) return true;
-                            if (id === SKIP_CLASSES[i]) return true;
-                        }
-                        return false;
+                function collectText(el, parts) {
+                    if (!el || el.nodeType === 8) return; // комментарии — пропускаем
+                    if (el.nodeType === 3) {              // текстовый узел
+                        var t = el.textContent.trim();
+                        if (t) parts.push(t);
+                        return;
                     }
-
-                    function collectText(el, parts) {
-                        if (!el || el.nodeType === 8) return; // комментарии — пропускаем
-                        if (el.nodeType === 3) {              // текстовый узел
-                            var t = el.textContent.trim();
-                            if (t) parts.push(t);
-                            return;
-                        }
-                        if (!isVisible(el)) return;
-                        if (shouldSkip(el)) return;
-                        for (var i = 0; i < el.childNodes.length; i++) {
-                            collectText(el.childNodes[i], parts);
-                        }
+                    if (!isPotentiallyVisible(el)) return;
+                    if (shouldSkip(el)) return;
+                    for (var i = 0; i < el.childNodes.length; i++) {
+                        collectText(el.childNodes[i], parts);
                     }
+                }
 
-                    // Приоритет: main / #content / .content / article / body
-                    var root = (
-                        document.querySelector('main') ||
-                        document.querySelector('#content') ||
-                        document.querySelector('.content') ||
-                        document.querySelector('article') ||
-                        document.body
-                    );
+                // Перебираем кандидатов — берём первый давший непустой результат
+                var rootCandidates = [
+                    document.querySelector('main'),
+                    document.querySelector('#content'),
+                    document.querySelector('.content'),
+                    document.querySelector('article'),
+                    document.body
+                ];
 
-                    var parts = [];
-                    collectText(root, parts);
-                    return parts.join('\n');
-                })()
-            """)
-            page_source = response.get("result", {}).get("result", {}).get("value") or ""
-            page_source_lower = page_source.lower()
-            logger.debug(
-                f"Текст страницы для проверки ({len(page_source)} симв.): "
-                f"{page_source[:200]}..."
+                var parts = [];
+                for (var i = 0; i < rootCandidates.length; i++) {
+                    if (rootCandidates[i]) {
+                        collectText(rootCandidates[i], parts);
+                        if (parts.length > 0) break;
+                    }
+                }
+
+                // Fallback: если все фильтры дали пустой результат (NoJs, CSS-скрытие) —
+                // берём весь текст body без проверки видимости
+                if (parts.length === 0) {
+                    return document.body.innerText || document.body.textContent || '';
+                }
+
+                return parts.join('\n');
+            })()
+        """
+
+        async def _get_visible_text() -> str:
+            """Извлекает видимый текст страницы через JS — для анализа индикаторов."""
+            try:
+                response = await self.page.execute_script(_extract_text_js)
+                return response.get("result", {}).get("result", {}).get("value") or ""
+            except Exception as e:
+                logger.error(f"Не удалось получить видимый текст страницы: {e}")
+                return ""
+
+        async def _get_full_html() -> str:
+            """Возвращает полный innerHTML body — для проверки наличия контента."""
+            try:
+                response = await self.page.execute_script(
+                    "return document.body ? document.body.innerHTML : ''"
+                )
+                return response.get("result", {}).get("result", {}).get("value") or ""
+            except Exception as e:
+                logger.error(f"Не удалось получить innerHTML body: {e}")
+                return ""
+
+        # Шаг 1: проверяем наличие контента по полному HTML
+        full_html: str = await _get_full_html()
+        logger.debug(f"Размер body.innerHTML: {len(full_html)} симв.")
+        
+        # ДИАГНОСТИКА: форсируем перезагрузку всегда чтобы проверить влияние ожидания
+        #if True:  # TODO: убрать после диагностики, вернуть: len(full_html) <= min_content_length
+
+        if len(full_html) <= min_content_length:
+            logger.warning(
+                f"Контент страницы пустой или недостаточен "
+                f"({len(full_html)} симв., порог={min_content_length}) — "
+                f"выполняем refresh и ожидаем {page_reload_timeout}с"
             )
-        except Exception as e:
-            logger.error(f"Не удалось получить текст страницы: {e}")
-            return False, "page_source_error"
+            try:
+                await self.browser.refresh()
+                logger.info(f"Refresh выполнен, ожидаем {page_reload_timeout}с")
+                await asyncio.sleep(page_reload_timeout)
+                full_html = await _get_full_html()
+                logger.debug(
+                    f"Размер body.innerHTML после refresh: {len(full_html)} симв."
+                )
+                if len(full_html) <= min_content_length:
+                    logger.error(
+                        f"Контент не получен после refresh "
+                        f"({len(full_html)} симв.) — page_source_error"
+                    )
+                    return False, "page_source_error"
+                logger.info(
+                    f"Контент получен после refresh ({len(full_html)} симв.)"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка refresh страницы: {e}")
+                return False, "page_source_error"
+
+        # Шаг 2: получаем видимый текст для анализа индикаторов
+        visible_text: str = await _get_visible_text()
+        visible_text_lower: str = visible_text.lower()
+        logger.debug(
+            f"Видимый текст для проверки ({len(visible_text)} симв.): "
+            f"{visible_text[:200]}..."
+        )
 
         # Получаем индикаторы из шаблона
         success_indicators = (
@@ -2320,7 +2392,7 @@ class RegistrationController:
         else:
             logger.debug(f"Правило 1: проверяем {len(error_indicators)} индикаторов ошибки")
             for phrase in error_indicators:
-                found = phrase.lower() in page_source_lower
+                found = phrase.lower() in visible_text_lower
                 logger.debug(f"  Правило 1: {phrase!r} → {'НАЙДЕН ⚠' if found else 'не найден'}")
                 if found:
                     logger.warning(f"Индикатор ошибки сработал: {phrase!r}")
@@ -2332,7 +2404,7 @@ class RegistrationController:
         else:
             logger.debug(f"Правило 2: проверяем {len(success_indicators)} индикаторов успеха")
             for phrase in success_indicators:
-                found = phrase.lower() in page_source_lower
+                found = phrase.lower() in visible_text_lower
                 logger.debug(f"  Правило 2: {phrase!r} → {'НАЙДЕН ✓' if found else 'не найден'}")
                 if found:
                     logger.info(f"Индикатор успеха сработал: {phrase!r}")
@@ -2347,10 +2419,10 @@ class RegistrationController:
 
             try:
                 # Вариант А: проверяем наличие password-полей вне формы логина
-                result_a = await self._check_fields_variant_a(page_source_lower)
+                result_a = await self._check_fields_variant_a(visible_text_lower)
 
                 # Вариант Б: проверяем наличие любых полей регистрации вне формы логина
-                # result_b = await self._check_fields_variant_b(page_source_lower)
+                # result_b = await self._check_fields_variant_b(visible_text_lower)
 
                 # Используем Вариант А (раскомментируй Б для теста)
                 if result_a is not None:

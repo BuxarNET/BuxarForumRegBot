@@ -74,5 +74,9 @@
   "one_time_field_keywords": [
     "captcha", "imagestring", "image_string", "seccode",
     "answer", "question", "secret", "код", "code", "q_and_a"
+  ],
+  "register_radio_keywords": [
+    "register", "sign up", "зарегистрироваться", "регистрация",
+    "нет, зарегистрироваться", "create account", "новый пользователь"
   ]
 }
