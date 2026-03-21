@@ -52,9 +52,9 @@
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-03-19T21:34:06",
+    "last_attempt": "2026-03-19T21:48:11",
     "last_error": {
-      "reason": "page_unavailable",
+      "reason": "no_form_detected",
       "proxy_used": null
     }
   },

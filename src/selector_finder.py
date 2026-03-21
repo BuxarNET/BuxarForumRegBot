@@ -196,18 +196,25 @@ class SelectorFinder:
                 form_id = attrs.get("id", "")
                 selector = self._generate_css_selector(form)
 
-                # Фильтрация по action/name/id формы
+                # Штраф за форму логина по action/name/id (не исключаем жёстко —
+                # форум с объединённой формой логина/регистрации должен остаться кандидатом)
+                login_form_penalty = False
                 if any(kw in action for kw in skip_action_kw):
-                    logger.debug(f"[{selector}] Исключена по action='{action}'")
-                    continue
-                if any(kw in name for kw in skip_name_kw):
-                    logger.debug(f"[{selector}] Исключена по name='{name}'")
-                    continue
-                if any(kw in form_id for kw in skip_name_kw):
-                    logger.debug(f"[{selector}] Исключена по id='{form_id}'")
-                    continue
+                    logger.debug(f"[{selector}] Штраф -20 по action='{action}'")
+                    login_form_penalty = True
+                elif any(kw in name for kw in skip_name_kw):
+                    logger.debug(f"[{selector}] Штраф -20 по name='{name}'")
+                    login_form_penalty = True
+                elif any(kw in form_id for kw in skip_name_kw):
+                    logger.debug(f"[{selector}] Штраф -20 по id='{form_id}'")
+                    login_form_penalty = True
 
-                candidates.append({"element": form, "selector": selector, "is_form": True})
+                candidates.append({
+                    "element": form,
+                    "selector": selector,
+                    "is_form": True,
+                    "login_form_penalty": login_form_penalty,
+                })
 
             except Exception as e:
                 logger.warning(f"Ошибка обработки формы: {e}")
@@ -306,63 +313,63 @@ class SelectorFinder:
                         logger.debug(f"[{selector}] Исключён — все поля нежелательные")
                         continue
 
-                # Шаг 3.5: фильтрация по содержимому блока
-                # Собираем все текстовые признаки из всех элементов блока
-                block_tokens: list[str] = []
-
-                # Атрибуты формы
+                # Шаг 3.5: раздельная фильтрация по атрибутам формы и полям внутри
+                # Атрибуты формы — штраф -20 (не исключаем жёстко:
+                # форум с объединённой формой логина/регистрации должен остаться кандидатом)
+                form_tokens: list[str] = []
                 try:
-                    block_tokens.append(element.get_attribute("action") or "")
-                    block_tokens.append(element.get_attribute("name") or "")
-                    block_tokens.append(element.get_attribute("id") or "")
+                    form_tokens.append(element.get_attribute("action") or "")
+                    form_tokens.append(element.get_attribute("name") or "")
+                    form_tokens.append(element.get_attribute("id") or "")
                 except Exception:
                     pass
 
-                # Поля ввода: name, id, placeholder, type
+                # Токены полей внутри формы — только для проверки нежелательных полей
+                # Намеренно не используем для skip_action_kw/skip_name_kw:
+                # input[name='login'] на форуме регистрации не должен исключать форму
+                field_tokens: list[str] = []
                 for inp in visible_inputs:
                     try:
-                        block_tokens.append(inp.get_attribute("name") or "")
-                        block_tokens.append(inp.get_attribute("id") or "")
-                        block_tokens.append(inp.get_attribute("placeholder") or "")
-                        block_tokens.append(inp.get_attribute("type") or "")
+                        field_tokens.append(inp.get_attribute("name") or "")
+                        field_tokens.append(inp.get_attribute("id") or "")
+                        field_tokens.append(inp.get_attribute("placeholder") or "")
                     except Exception:
                         pass
-
-                # Кнопки: name, id, value + текст label
-                for btn in visible_buttons:
-                    try:
-                        block_tokens.append(btn.get_attribute("name") or "")
-                        block_tokens.append(btn.get_attribute("id") or "")
-                        block_tokens.append(btn.get_attribute("value") or "")
-                        block_tokens.append(await self._get_display_text(btn))
-                    except Exception:
-                        pass
-
-                # Чекбоксы: name, id, value
                 for cb in visible_checkboxes:
                     try:
-                        block_tokens.append(cb.get_attribute("name") or "")
-                        block_tokens.append(cb.get_attribute("id") or "")
-                        block_tokens.append(cb.get_attribute("value") or "")
+                        field_tokens.append(cb.get_attribute("name") or "")
+                        field_tokens.append(cb.get_attribute("id") or "")
+                        field_tokens.append(cb.get_attribute("value") or "")
                     except Exception:
                         pass
 
-                combined_block = " ".join(block_tokens).lower()
-
-                # Проверяем по обоим спискам исключений
-                skip_reason = next(
-                    (kw for kw in skip_action_kw + skip_name_kw if kw in combined_block),
-                    None,
-                )
-                if skip_reason:
+                # Жёсткое исключение если поля содержат нежелательные keywords
+                # (newsletter/subscribe и т.д.) — логика из оригинала сохранена
+                combined_fields = " ".join(field_tokens).lower()
+                if field_tokens and any(kw in combined_fields for kw in skip_field_kw):
                     logger.debug(
-                        f"[{selector}] Исключён по содержимому блока: '{skip_reason}'"
+                        f"[{selector}] Исключён по полям: найден нежелательный keyword"
                     )
                     continue
 
                 # Шаг 4: подсчёт score
                 score = 0
                 score_details: list[str] = []
+
+                # Штраф за атрибуты формы логина (флаг из Патча 1)
+                if cand.get("login_form_penalty"):
+                    score -= 20
+                    score_details.append("login_form_penalty(-20)")
+
+                # Дополнительный штраф если атрибуты формы совпадают со skip_kw
+                # (страховка для div-блоков у которых нет флага из Патча 1)
+                # Двойной штраф (-40) возможен если совпали оба условия — намеренное
+                # поведение для приоритизации форм с отдельной регистрацией
+                combined_form = " ".join(form_tokens).lower()
+                skip_kws = skip_action_kw + skip_name_kw
+                if any(kw in combined_form for kw in skip_kws):
+                    score -= 20
+                    score_details.append("form_tokens_penalty(-20)")
 
                 # Базовые очки
                 password_count = sum(
@@ -574,6 +581,7 @@ class SelectorFinder:
         email_keywords = [k.lower() for k in self.common_fields.get("email_keywords", [])]
         confirm_keywords = [k.lower() for k in self.common_fields.get("confirm_password_keywords", [])]
         confirm_email_keywords = [k.lower() for k in self.common_fields.get("confirm_email_keywords", [])]
+        register_radio_keywords = [k.lower() for k in self.common_fields.get("register_radio_keywords", [])]
 
         # Получаем все поля формы
         try:
@@ -680,7 +688,27 @@ class SelectorFinder:
                         "display_text": display_text,
                     })
                     continue
-                
+
+                # Radio-кнопки
+                if field_type == "radio":
+                    if any(kw in combined for kw in register_radio_keywords):
+                        if "register_radio" not in result:
+                            result["register_radio"] = selector
+                            result["register_radio_value"] = attrs.get("value", "")
+                            if display_text:
+                                result["register_radio_label"] = display_text
+                            logger.debug(
+                                f"Определён register_radio: {selector} | "
+                                f"value='{attrs.get('value', '')}' | '{display_text}'"
+                            )
+                        else:
+                            logger.warning(
+                                f"Найдено несколько radio регистрации — "
+                                f"пропускаем: {selector} | '{display_text}'"
+                            )
+                    # Все radio (совпавшие и нет) не идут в custom_fields
+                    continue
+
                 # Email поля
                 if field_type == "email" or any(kw in combined for kw in email_keywords):
                     if any(kw in combined for kw in confirm_email_keywords):

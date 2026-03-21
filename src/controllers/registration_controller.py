@@ -467,6 +467,7 @@ class RegistrationController:
         STANDARD_KEYS = [
             "username", "email", "confirm_email", "password", "confirm_password",
             "agree_checkbox", "submit_button", "captcha_indicator",
+            "register_radio",
         ]
 
         # Локальный кэш DOM-проверок — сбрасывается при каждом новом вызове метода,
@@ -587,6 +588,7 @@ class RegistrationController:
         standard = (
             "username", "email", "confirm_email", "password", "confirm_password",
             "agree_checkbox", "submit_button", "captcha_indicator",
+            "register_radio",
         )
         for field_name in standard:
             sel = selectors.get(field_name)
@@ -932,6 +934,65 @@ class RegistrationController:
         checkbox_skip_keywords = [k.lower() for k in common_fields.get("checkbox_skip_keywords", [])]
         one_time_field_keywords = [k.lower() for k in common_fields.get("one_time_field_keywords", [])]
 
+        # Шаг 0: radio-кнопка регистрации
+        # Должен выполняться до заполнения полей — на XenForo выбор radio
+        # меняет доступность полей формы (username/email/password становятся активными)
+        logger.info("Шаг 0: обработка radio-кнопки регистрации")
+        register_radio_selector = selectors.get("register_radio")
+        if not register_radio_selector:
+            logger.debug("radio-кнопка регистрации не найдена в блоке — пропускаем Шаг 0")
+        else:
+            radio_source = selectors.get("register_radio_source", "manual")
+            radio_clicked = False
+
+            if radio_source == "template":
+                # Значение из шаблона — кликаем без запроса
+                try:
+                    await self.browser.human_click(register_radio_selector)
+                    await asyncio.sleep(0.5)
+                    filled_fields.append("register_radio")
+                    radio_clicked = True
+                    logger.info(f"radio регистрации нажата (шаблон): {register_radio_selector}")
+                except Exception as e:
+                    logger.warning(f"Не удалось нажать radio регистрации ({register_radio_selector}): {e}")
+
+            elif radio_source in ("common_fields", "manual"):
+                # common_fields или manual — пробуем кликнуть
+                try:
+                    await self.browser.human_click(register_radio_selector)
+                    await asyncio.sleep(0.5)
+                    filled_fields.append("register_radio")
+                    radio_clicked = True
+                    logger.info(
+                        f"radio регистрации нажата "
+                        f"({'common_fields' if radio_source == 'common_fields' else 'ручной ввод'}): "
+                        f"{register_radio_selector}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Не удалось нажать radio регистрации ({register_radio_selector}): {e} "
+                        f"— запрашиваем ручной ввод"
+                    )
+                    manual_confirm = await self._ask_manual_input(
+                        field_name="register_radio",
+                        selector_hint=register_radio_selector,
+                        hint="Выберите radio-кнопку регистрации вручную в браузере и нажмите Enter",
+                        display_text=selectors.get("register_radio_label", ""),
+                    )
+                    if manual_confirm:
+                        # Оператор подтвердил выбор — фиксируем как заполненное
+                        filled_fields.append("register_radio")
+                        radio_clicked = True
+                        logger.info(
+                            f"radio регистрации успешно подтверждена оператором: "
+                            f"{register_radio_selector}"
+                        )
+                    else:
+                        logger.info("radio регистрации пропущена оператором — продолжаем")
+
+            if not radio_clicked and radio_source != "template":
+                logger.debug("radio регистрации не нажата — продолжаем заполнение")
+
         # Шаг 1: поля ввода
         logger.info("Шаг 1: заполнение полей ввода")
         standard_fields = {
@@ -1224,11 +1285,8 @@ class RegistrationController:
                             await self.browser.human_click(agree_selector)
                             logger.info(f"Чекбокс согласия отмечен: {agree_selector}")
                         filled_fields.append("agree_checkbox")
-                    if engine_name:
-                        await self.template_manager.update_template(
-                            engine_name=engine_name,
-                            new_data={"agree_step": {"checkboxes": [agree_selector]}},
-                        )
+                    # Сохранение через _save_block_to_template при успехе регистрации —
+                    # agree_checkbox в STANDARD_KEYS, source проверяется автоматически
             except Exception as e:
                 logger.warning(f"Не удалось обработать чекбокс согласия ({agree_selector}): {e}")
                 skipped_fields.append("agree_checkbox")
