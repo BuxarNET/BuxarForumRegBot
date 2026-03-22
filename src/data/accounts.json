@@ -20,14 +20,17 @@
         "Male"
       ],
       "firstname": [
-        "Иван"
+        "Виталий"
       ],
       "lastname": [
         "Петров"
       ],
       "birthdate": [
-        "01.01.1990"
+        "01.09.1990"
       ],
+      "dob_month": ["9"],
+      "dob_day": ["1"],
+      "dob_year": ["1990"],
       "phone": null,
       "website": null,
       "occupation": null,
@@ -38,9 +41,6 @@
       "telegram": null,
       "subscriptionmethod": [
         "3"
-      ],
-      "register_vv[code]": [
-        "TDMBKG"
       ],
       "lang": [
         "1"

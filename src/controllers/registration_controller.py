@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -31,9 +32,15 @@ class AccountData(TypedDict):
 
 
 class FillFieldsResult(TypedDict):
-    ok: bool
-    filled: list[str]
-    skipped: list[str]
+    ok:                   bool
+    filled:               list[str]
+    skipped:              list[str]
+    filled_from_outside:  list[str]
+    new_custom_selectors: dict[str, tuple[str, str]]
+    new_checkboxes:       list[tuple[str, str]]
+    found_submit:         tuple[str, str] | None
+    reason:               NotRequired[str]
+
 
 class RegistrationController:
     """
@@ -43,7 +50,18 @@ class RegistrationController:
     TemplateManager для работы с шаблонами,
     SelectorFinder для эвристического поиска полей.
     """
-    
+
+    _PATTERN_CTRL_HASH: re.Pattern = re.compile(
+        r"^#ctrl_[a-f0-9]{32}$", re.IGNORECASE
+    )
+    _PATTERN_HEX_ID: re.Pattern = re.compile(
+        r"^#[a-f0-9]{16,}$", re.IGNORECASE
+    )
+    MAX_SELECTORS_PER_FIELD: int = 10
+    DYNAMIC_ID_PREFIXES: tuple[str, ...] = (
+        "#js_", "#random-", "#uuid-", "#generated-", "#id-",
+    )
+
     def __init__(
         self,
         browser_controller,
@@ -163,6 +181,9 @@ class RegistrationController:
                             filled_fields=filled_fields,
                             template=template,
                             engine_name=engine_name,
+                            new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                            new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                            found_submit=fill_result.get("found_submit") if fill_result else None,
                         )
                         await self._save_filled_to_profile(
                             filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
@@ -297,6 +318,9 @@ class RegistrationController:
                         filled_fields=filled_fields,
                         template=template,
                         engine_name=engine_name,
+                        new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                        new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                        found_submit=fill_result.get("found_submit") if fill_result else None,
                     )
                     # Сохраняем пропуски страницы — она принята успешно
                     await self._save_filled_to_profile(
@@ -358,6 +382,9 @@ class RegistrationController:
                             filled_fields=filled_fields,
                             template=template,
                             engine_name=engine_name,
+                            new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                            new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                            found_submit=fill_result.get("found_submit") if fill_result else None,
                         )
                         await self._save_filled_to_profile(
                             filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
@@ -400,6 +427,9 @@ class RegistrationController:
                         filled_fields=filled_fields,
                         template=template,
                         engine_name=engine_name,
+                        new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                        new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                        found_submit=fill_result.get("found_submit") if fill_result else None,
                     )
                     # Сохраняем пропуски финальной страницы
                     await self._save_filled_to_profile(
@@ -422,20 +452,7 @@ class RegistrationController:
                     f"Индикаторов не найдено — переходим к следующему блоку"
                 )
                 current_block_index += 1
-                
-            # Превышено максимальное количество шагов
-            logger.warning(f"Превышено максимальное количество шагов: {max_steps}")
-            return {
-                "success": False,
-                "message": f"Превышено максимальное количество шагов ({max_steps})",
-                "reason": "max_steps_exceeded",
-                "template_used": template.get("name") if template else "heuristic",
-                "screenshot": await self._take_screenshot(
-                    "max_steps", account_data.get("username")
-                ),
-                "form_data": account_data
-            }
-            
+                          
             # Достигнут лимит шагов — ручное подтверждение
             logger.warning("Достигнут лимит шагов — запрашиваем ручное подтверждение")
             test_result = await self._confirm_test_mode(
@@ -450,6 +467,9 @@ class RegistrationController:
                     filled_fields=filled_fields,
                     template=template,
                     engine_name=engine_name,
+                    new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                    new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                    found_submit=fill_result.get("found_submit") if fill_result else None,
                 )
                 await self._save_filled_to_profile(
                     filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
@@ -729,20 +749,29 @@ class RegistrationController:
         filled_fields: list[str],
         template: dict | None,
         engine_name: str | None,
+        new_custom_selectors: dict[str, tuple[str, str]] | None = None,
+        new_checkboxes: list[tuple[str, str]] | None = None,
+        found_submit: tuple[str, str] | None = None,
     ) -> None:
         """Сохраняет в шаблон только новые данные текущего блока.
 
         Вызывается только после подтверждённого успеха:
         - Триггер А: финальная успешная регистрация
         - Триггер Б: переход на следующую страницу (блок принят)
+        - Триггер В: ручное подтверждение оператором
 
-        Правило фильтрации по source:
-        - 'template'      → пропускаем: уже есть в шаблоне
-        - 'common_fields' → сохраняем: найдено эвристикой, в шаблоне нет
-        - 'manual'        → сохраняем: найдено без label, в шаблоне нет
+        Шаг 0: единая фильтрация всех входных данных до блоков А–Г.
+        Два критерия отсечения:
+        - source in (None, "", "unknown") → ошибка в коде выше, пропускаем с ERROR
+        - source == "template"            → уже в шаблоне, пропускаем
+        - _is_dynamic_selector(sel)       → динамический ID, пропускаем
 
-        Перед записью проверяем что селектор/label ещё не в template в памяти —
-        чтобы не делать лишний I/O если _merge_template всё равно ничего не изменит.
+        Блоки записи:
+        - Блок А: стандартные поля из filled_fields
+        - Блок Б: custom_fields из new_custom_selectors
+        - Блок В: agree_step.checkboxes из new_checkboxes
+        - Блок Г: submit_button fallback из found_submit
+        - Блок Д: form_selector из block
 
         Args:
             block: Блок из analyze_current_page.
@@ -750,27 +779,77 @@ class RegistrationController:
             filled_fields: Список реально заполненных полей из _fill_fields.
             template: Текущий шаблон в памяти (для проверки дублей).
             engine_name: Название движка = имя файла шаблона без расширения.
+            new_custom_selectors: Новые селекторы custom-полей: {field: (sel, source)}.
+            new_checkboxes: Новые чекбоксы эвристики: [(sel, source), ...].
+            found_submit: Найденный fallback-селектор кнопки: (sel, source) | None.
         """
-        if not engine_name or not filled_fields:
-            logger.debug("Сохранение в шаблон пропущено: нет engine_name или filled_fields")
+        if not engine_name:
+            logger.debug("Сохранение в шаблон пропущено: нет engine_name")
             return
 
-        logger.debug(f"Сохраняем в шаблон данные блока: поля={filled_fields}")
+        new_custom_selectors = new_custom_selectors or {}
+        new_checkboxes = new_checkboxes or []
 
         template_fields = (template or {}).get("fields", {})
         fields_to_save: dict = {}
+        checkboxes_to_save: list[str] = []
 
-        for key in filled_fields:
-            source = selectors.get(f"{key}_source", "unknown")
+        # ── Шаг 0: единая фильтрация (ОДИН РАЗ до всех блоков) ──────────────
 
-            if source == "template":
-                logger.debug(f"Поле '{key}' source=template → пропускаем")
-                continue
+        def _check_source(src: str | None, sel: str, field: str) -> bool:
+            """Возвращает True если селектор прошёл фильтр и может быть сохранён."""
+            if src in (None, "", "unknown"):
+                logger.error(
+                    f"Селектор без валидного source: '{sel}' "
+                    f"для поля '{field}' — пропускаем"
+                )
+                return False
+            if src == "template":
+                logger.debug(
+                    f"Поле '{field}': source=template → пропускаем"
+                )
+                return False
+            if self._is_dynamic_selector(sel):
+                logger.debug(
+                    f"Отсечён динамический селектор '{field}': {sel} "
+                    f"[source={src}]"
+                )
+                return False
+            return True
 
-            # source == "common_fields" или "manual" — в шаблоне точно нет по логике *_source.
-            # Дополнительно проверяем кэш в памяти чтобы избежать лишнего I/O.
+        filled_fields_clean: list[str] = [
+            f for f in filled_fields
+            if _check_source(
+                selectors.get(f"{f}_source"),
+                selectors.get(f, ""),
+                f,
+            )
+        ]
+
+        new_custom_clean: dict[str, str] = {
+            field: sel
+            for field, (sel, src) in new_custom_selectors.items()
+            if _check_source(src, sel, field)
+        }
+
+        new_checkboxes_clean: list[str] = [
+            sel
+            for sel, src in new_checkboxes
+            if _check_source(src, sel, "checkbox")
+        ]
+
+        found_submit_clean: str | None = None
+        if found_submit:
+            sel, src = found_submit
+            if _check_source(src, sel, "submit_button"):
+                found_submit_clean = sel
+
+        # ── Блок А: стандартные поля ──────────────────────────────────────────
+
+        for key in filled_fields_clean:
             selector = selectors.get(key)
             label = selectors.get(f"{key}_label", "")
+            source = selectors.get(f"{key}_source", "")
 
             if selector:
                 existing = template_fields.get(key)
@@ -778,11 +857,21 @@ class RegistrationController:
                     existing if isinstance(existing, list)
                     else ([existing] if existing else [])
                 )
-                if selector not in existing_list:
+                if len(existing_list) >= self.MAX_SELECTORS_PER_FIELD:
+                    logger.warning(
+                        f"Превышен лимит селекторов для '{key}' "
+                        f"({len(existing_list)}/{self.MAX_SELECTORS_PER_FIELD}) "
+                        f"— '{selector}' не сохранён"
+                    )
+                elif selector not in existing_list:
                     fields_to_save[key] = selector
-                    logger.info(f"Новый селектор для '{key}' [{source}]: {selector}")
+                    logger.info(
+                        f"Новый селектор для '{key}' [{source}]: {selector}"
+                    )
                 else:
-                    logger.debug(f"Селектор для '{key}' уже в шаблоне → пропускаем")
+                    logger.debug(
+                        f"Селектор для '{key}' уже в шаблоне → пропускаем"
+                    )
 
             if label:
                 existing_label = template_fields.get(f"{key}_label")
@@ -794,40 +883,180 @@ class RegistrationController:
                     fields_to_save[f"{key}_label"] = label
                     logger.info(f"Новый label для '{key}': «{label}»")
                 else:
-                    logger.debug(f"Label для '{key}' уже в шаблоне → пропускаем")
+                    logger.debug(
+                        f"Label для '{key}' уже в шаблоне → пропускаем"
+                    )
 
-        # form_selector из блока
-        form_selector = block.get("form_selector")
+        # ── Блок Б: custom_fields ─────────────────────────────────────────────
 
-        if not fields_to_save and not form_selector:
+        for field, sel in new_custom_clean.items():
+            existing = template_fields.get(field)
+            existing_list = (
+                existing if isinstance(existing, list)
+                else ([existing] if existing else [])
+            )
+            if len(existing_list) >= self.MAX_SELECTORS_PER_FIELD:
+                logger.warning(
+                    f"Превышен лимит селекторов для custom '{field}' "
+                    f"({len(existing_list)}/{self.MAX_SELECTORS_PER_FIELD}) "
+                    f"— '{sel}' не сохранён"
+                )
+            elif sel not in existing_list:
+                fields_to_save[field] = sel
+                logger.info(f"Новый селектор custom-поля '{field}': {sel}")
+            else:
+                logger.debug(
+                    f"Селектор custom '{field}' уже в шаблоне → пропускаем"
+                )
+
+        # ── Блок В: agree_step.checkboxes ─────────────────────────────────────
+
+        existing_checkboxes: list[str] = (
+            (template or {}).get("agree_step", {}).get("checkboxes") or []
+        )
+        for sel in new_checkboxes_clean:
+            if len(existing_checkboxes) >= self.MAX_SELECTORS_PER_FIELD:
+                logger.warning(
+                    f"Превышен лимит чекбоксов "
+                    f"({len(existing_checkboxes)}/{self.MAX_SELECTORS_PER_FIELD}) "
+                    f"— '{sel}' не сохранён"
+                )
+            elif sel not in existing_checkboxes:
+                checkboxes_to_save.append(sel)
+                logger.info(f"Новый чекбокс согласия: {sel}")
+            else:
+                logger.debug(f"Чекбокс '{sel}' уже в шаблоне → пропускаем")
+
+        # ── Блок Г: submit_button fallback ────────────────────────────────────
+
+        if found_submit_clean:
+            existing_submit = template_fields.get("submit_button")
+            existing_submit_list = (
+                existing_submit if isinstance(existing_submit, list)
+                else ([existing_submit] if existing_submit else [])
+            )
+            if len(existing_submit_list) >= self.MAX_SELECTORS_PER_FIELD:
+                logger.warning(
+                    f"Превышен лимит для submit_button "
+                    f"({len(existing_submit_list)}/{self.MAX_SELECTORS_PER_FIELD}) "
+                    f"— '{found_submit_clean}' не сохранён"
+                )
+            elif found_submit_clean not in existing_submit_list:
+                fields_to_save["submit_button"] = found_submit_clean
+                logger.info(
+                    f"Новый fallback-селектор submit_button: {found_submit_clean}"
+                )
+            else:
+                logger.debug(
+                    f"submit_button '{found_submit_clean}' уже в шаблоне → пропускаем"
+                )
+
+        # ── Блок Д: form_selector ─────────────────────────────────────────────
+
+        new_form_selector: str | None = None
+        raw_form_selector = block.get("form_selector")
+        form_source = block.get("form_selector_source", "heuristic")
+
+        if raw_form_selector:
+            if form_source in (None, "", "unknown"):
+                logger.error(
+                    f"form_selector без валидного source: "
+                    f"'{raw_form_selector}' — пропускаем"
+                )
+            elif form_source == "template":
+                logger.debug(
+                    f"Отсечён form_selector: '{raw_form_selector}' "
+                    f"[source=template]"
+                )
+            elif self._is_dynamic_selector(raw_form_selector):
+                logger.debug(
+                    f"Отсечён динамический form_selector: '{raw_form_selector}'"
+                )
+            else:
+                new_form_selector = raw_form_selector
+
+        # ── Проверка наличия данных для записи ───────────────────────────────
+
+        if not fields_to_save and not checkboxes_to_save and not new_form_selector:
             logger.debug("Нет новых данных для сохранения в шаблон")
             return
 
-        # Один вызов update_template со всеми новыми данными сразу
+        # ── Один вызов update_template ────────────────────────────────────────
+
         new_data: dict = {}
 
-        if form_selector:
-            new_data["registration_page"] = {"form_selector": form_selector}
-
+        if new_form_selector:
+            new_data["registration_page"] = {
+                "form_selector": [new_form_selector]
+            }
         if fields_to_save:
             new_data["fields"] = fields_to_save
+        if checkboxes_to_save:
+            new_data["agree_step"] = {"checkboxes": checkboxes_to_save}
 
-        await self.template_manager.update_template(
-            engine_name=engine_name,
-            new_data=new_data,
-        )
-        logger.info(
-            f"Шаблон '{engine_name}' обновлён: "
-            f"полей={list(fields_to_save.keys())}"
-        )
+        try:
+            await self.template_manager.update_template(
+                engine_name=engine_name,
+                new_data=new_data,
+            )
+            logger.info(
+                f"Шаблон '{engine_name}' обновлён: "
+                f"полей={list(fields_to_save.keys())}, "
+                f"чекбоксов={len(checkboxes_to_save)}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Не удалось обновить шаблон '{engine_name}': {e}"
+            )
+            return
 
-        # Точечное обновление template в памяти
-        if template:
-            if fields_to_save:
-                for key, val in fields_to_save.items():
-                    template.setdefault("fields", {})[key] = val
-            if form_selector:
-                template.setdefault("registration_page", {})["form_selector"] = form_selector
+        # ── Синхронизация template в памяти (только после успешной записи) ───
+
+        if not template:
+            return
+
+        if fields_to_save:
+            for key, val in fields_to_save.items():
+                existing = (
+                    template.setdefault("fields", {})
+                            .setdefault(key, [])
+                )
+                if isinstance(existing, str):
+                    existing = [existing]
+                    template["fields"][key] = existing
+                if val not in existing:
+                    existing.append(val)
+
+        if checkboxes_to_save:
+            existing = (
+                template.setdefault("agree_step", {})
+                        .setdefault("checkboxes", [])
+            )
+            for sel in checkboxes_to_save:
+                if sel not in existing:
+                    existing.append(sel)
+
+        if found_submit_clean:
+            existing_sub = (
+                template.setdefault("fields", {})
+                        .setdefault("submit_button", [])
+            )
+            if isinstance(existing_sub, str):
+                existing_sub = [existing_sub]
+                template["fields"]["submit_button"] = existing_sub
+            if found_submit_clean not in existing_sub:
+                existing_sub.append(found_submit_clean)
+
+        if new_form_selector:
+            existing_fs = (
+                template.setdefault("registration_page", {})
+                        .setdefault("form_selector", [])
+            )
+            if isinstance(existing_fs, str):
+                existing_fs = [existing_fs]
+                template["registration_page"]["form_selector"] = existing_fs
+            if new_form_selector not in existing_fs:
+                existing_fs.append(new_form_selector)
 
     async def _save_filled_to_profile(
         self,
@@ -945,7 +1174,7 @@ class RegistrationController:
         template: dict | None = None,
         engine_name: str | None = None,
         form_selector: str | None = None,
-    ) -> dict:
+    ) -> FillFieldsResult:
         """Заполняет поля формы регистрации.
 
         Порядок работы:
@@ -958,23 +1187,29 @@ class RegistrationController:
         Args:
             selectors: Словарь селекторов полей.
             account_data: Данные аккаунта пользователя.
-            template: Текущий шаблон (для обновления).
-            engine_name: Название движка (для обновления шаблона).
+            template: Текущий шаблон (только для чтения — не обновляется внутри метода).
+            engine_name: Название движка (передаётся в аккумуляторы для контекста).
+            form_selector: Селектор формы (для передачи в _handle_submit).
 
         Returns:
-            Словарь с результатом заполнения:
-            - "ok": False только при таймауте ручного ввода
-            - "filled": список реально заполненных полей
-            - "skipped": список пропущенных пользователем полей
-
-            Пример: {"ok": True, "filled": ["username", "email"], "skipped": ["confirm_password"]}
+            FillFieldsResult со следующими полями:
+            - ok: False только при таймауте ручного ввода
+            - filled: список реально заполненных полей
+            - skipped: список пропущенных пользователем полей
+            - filled_from_outside: заполнены из п.3/п.4 — не из профиля/шаблона
+            - new_custom_selectors: новые селекторы custom-полей {field: (sel, source)}
+            - new_checkboxes: новые чекбоксы эвристики [(sel, source), ...]
+            - found_submit: найденный fallback-селектор кнопки (sel, source) | None
         """
         logger.info("=== Начало заполнения полей формы ===")
         username = account_data.get("username", "")
 
-        filled_fields: list[str] = []   # реально заполненные поля
-        skipped_fields: list[str] = []  # пропущенные пользователем
-        filled_from_outside: list[str] = []  # заполнены из п.3/п.4 — не из профиля/шаблона
+        filled_fields: list[str] = []                        # реально заполненные поля
+        skipped_fields: list[str] = []                       # пропущенные пользователем
+        filled_from_outside: list[str] = []                  # заполнены из п.3/п.4 — не из профиля/шаблона
+        new_custom_selectors: dict[str, tuple[str, str]] = {}  # новые селекторы custom-полей: {field: (sel, source)}
+        new_checkboxes: list[tuple[str, str]] = []           # новые чекбоксы эвристики: [(sel, source), ...]
+        found_submit: tuple[str, str] | None = None          # найденный fallback-селектор кнопки: (sel, source)
 
         # Загружаем ключевые слова
         common_fields = await self.template_manager.get_common_fields()
@@ -1132,25 +1367,6 @@ class RegistrationController:
             if field_filled:
                 filled_fields.append(field_name)
 
-            # Сразу обновляем шаблон если нашли рабочий селектор
-            # 🔧 НОВОЕ: не обновляем шаблон для одноразовых полей
-            is_one_time = any(kw in field_name.lower() for kw in one_time_field_keywords)
-            if used_selector and engine_name and not is_one_time:
-                logger.debug(f"Обновляем шаблон: поле '{field_name}' = {used_selector} ")
-                updated = await self.template_manager.update_template(
-                    engine_name=engine_name,
-                    new_data={"fields": {field_name: used_selector}},
-                )
-                # Обновляем template в памяти
-                if updated and template:
-                    fields = template.setdefault("fields ", {})
-                    existing = fields.get(field_name)
-                    if isinstance(existing, list):
-                        if used_selector not in existing:
-                            existing.append(used_selector)
-                    else:
-                        fields[field_name] = [used_selector]
-
         # (продолжение шага 1) custom_fields
         profile_custom = account_data.get("custom_fields", {}) or {}
 
@@ -1183,6 +1399,9 @@ class RegistrationController:
                             await self.browser.human_click(sel)
                             logger.info(f"Чекбокс '{field_name}' отмечен: {sel}")
                         filled_fields.append(field_name)  # элемент найден — успех
+                        if not is_one_time:
+                            source = custom_field.get("source", "manual")
+                            new_checkboxes.append((sel, source))  # аккумулятор
                 except Exception as e:
                     logger.warning(f"Не удалось обработать чекбокс '{field_name}' ({sel}): {e}")
                     skipped_fields.append(field_name)
@@ -1245,16 +1464,8 @@ class RegistrationController:
                             if manual_value not in new_list:
                                 new_list.append(manual_value)
                             account_data.setdefault("custom_fields", {})[field_name] = new_list
-                    # Обновляем шаблон
-                    if engine_name and not is_one_time:
-                        await self.template_manager.update_template(
-                            engine_name=engine_name,
-                            new_data={"fields": {field_name: sel}},
-                        )
-                        if template:
-                            template.setdefault("fields", {}).setdefault(field_name, [])
-                            if sel not in template["fields"][field_name]:
-                                template["fields"][field_name].append(sel)
+                            if not is_one_time:
+                                new_custom_selectors[field_name] = (sel, "manual")  # аккумулятор
 
             else:
                 # п.3: автоопределение через known_field_types
@@ -1279,15 +1490,8 @@ class RegistrationController:
                         filled_fields.append(field_name)
                         filled_from_outside.append(field_name)  # п.3
                         account_data.setdefault("custom_fields", {})[field_name] = [auto_value]
-                        if engine_name and not is_one_time:
-                            await self.template_manager.update_template(
-                                engine_name=engine_name,
-                                new_data={"fields": {field_name: sel}},
-                            )
-                            if template:
-                                template.setdefault("fields", {}).setdefault(field_name, [])
-                                if sel not in template["fields"][field_name]:
-                                    template["fields"][field_name].append(sel)
+                        if not is_one_time:
+                            new_custom_selectors[field_name] = (sel, "auto")  # аккумулятор
                         continue
 
                 # п.4: ручной ввод
@@ -1306,15 +1510,8 @@ class RegistrationController:
                         filled_fields.append(field_name)
                         filled_from_outside.append(field_name)  # п.4
                         account_data.setdefault("custom_fields", {})[field_name] = [manual_value]
-                        if engine_name and not is_one_time:
-                            await self.template_manager.update_template(
-                                engine_name=engine_name,
-                                new_data={"fields": {field_name: sel}},
-                            )
-                            if template:
-                                template.setdefault("fields", {}).setdefault(field_name, [])
-                                if sel not in template["fields"][field_name]:
-                                    template["fields"][field_name].append(sel)
+                        if not is_one_time:
+                            new_custom_selectors[field_name] = (sel, "manual")  # аккумулятор
                 else:
                     # п.4: пропуск → [] в память
                     logger.info(f"Доп. поле '{field_name}' пропущено оператором — продолжаем")
@@ -1359,27 +1556,54 @@ class RegistrationController:
                 skipped_fields.append("agree_checkbox")
         else:
             logger.debug("Чекбокс согласия в блоке не найден — пропускаем")
-            
+
         # Шаг 3: капча
         logger.info("Шаг 3: обработка капчи")
         captcha_ok = await self._handle_captcha(selectors)
         if not captcha_ok:
             logger.warning("Капча не решена — форум в бад")
-            return {"ok": False, "reason": "captcha_timeout", "filled": filled_fields, "skipped": skipped_fields, "filled_from_outside": filled_from_outside}
+            return {
+                "ok":                   False,
+                "reason":               "captcha_timeout",
+                "filled":               filled_fields,
+                "skipped":              skipped_fields,
+                "filled_from_outside":  filled_from_outside,
+                "new_custom_selectors": new_custom_selectors,
+                "new_checkboxes":       new_checkboxes,
+                "found_submit":         found_submit,
+            }
 
         # Шаг 4: кнопка submit
         logger.info("Шаг 4: нажатие кнопки submit")
-        submit_ok = await self._handle_submit(selectors, form_selector, template, engine_name)
+        submit_ok, found_submit = await self._handle_submit(selectors, form_selector)
         if not submit_ok:
             logger.warning("Кнопка submit не нажата — форум в бад")
-            return {"ok": False, "reason": "submit_failed", "filled": filled_fields, "skipped": skipped_fields, "filled_from_outside": filled_from_outside}
+            return {
+                "ok":                   False,
+                "reason":               "submit_failed",
+                "filled":               filled_fields,
+                "skipped":              skipped_fields,
+                "filled_from_outside":  filled_from_outside,
+                "new_custom_selectors": new_custom_selectors,
+                "new_checkboxes":       new_checkboxes,
+                "found_submit":         found_submit,
+            }
 
         logger.info(
             f"=== Заполнение полей завершено: "
             f"заполнено={filled_fields}, пропущено={skipped_fields} ==="
         )
-        return {"ok": True, "filled": filled_fields, "skipped": skipped_fields, "filled_from_outside": filled_from_outside}
-    
+        return {
+            "ok":                   True,
+            "filled":               filled_fields,
+            "skipped":              skipped_fields,
+            "filled_from_outside":  filled_from_outside,
+            "new_custom_selectors": new_custom_selectors,
+            "new_checkboxes":       new_checkboxes,
+            "found_submit":         found_submit,
+        }
+        
+        
     def _unpack_fill_result(
         self,
         result: str | tuple[str, list[str]],
@@ -1618,13 +1842,12 @@ class RegistrationController:
         template: dict | None,
         agree_keywords: list[str],
         checkbox_skip_keywords: list[str],
-        engine_name: str | None = None,
-    ) -> None:
+    ) -> list[tuple[str, str]]:
         """Ставит галочки согласия из шаблона и эвристики.
 
         Порядок:
-        1. Галочки из шаблона agree_step.checkboxes
-        2. Эвристика — ищет чекбоксы по ключевым словам внутри формы
+        1. Галочки из шаблона agree_step.checkboxes — source='template'
+        2. Эвристика — ищет чекбоксы по ключевым словам внутри формы — source='heuristic'
         3. Если шаблона нет — ставим все подходящие чекбоксы на странице
 
         Args:
@@ -1632,9 +1855,13 @@ class RegistrationController:
             template: Текущий шаблон.
             agree_keywords: Ключевые слова согласия.
             checkbox_skip_keywords: Ключевые слова для пропуска.
-            engine_name: Название движка для обновления шаблона.
+
+        Returns:
+            Список кортежей (selector, source) для всех успешно нажатых чекбоксов.
+            source='template' — галочка из шаблона, source='heuristic' — найдена эвристикой.
         """
         checked_selectors: list[str] = []
+        new_checkboxes: list[tuple[str, str]] = []
 
         # Этап 1: галочки из шаблона
         agree_step = (template or {}).get("agree_step", {}) or {}
@@ -1645,6 +1872,7 @@ class RegistrationController:
                 await self.browser.human_click(cb_selector)
                 logger.info(f"Галочка из шаблона поставлена: {cb_selector}")
                 checked_selectors.append(cb_selector)
+                new_checkboxes.append((cb_selector, "template"))
             except Exception as e:
                 logger.warning(f"Не удалось поставить галочку из шаблона '{cb_selector}': {e}")
 
@@ -1675,8 +1903,6 @@ class RegistrationController:
         except Exception as e:
             logger.warning(f"Ошибка поиска чекбоксов: {e}")
 
-        new_checkboxes: list[str] = []
-
         for cb in all_checkboxes:
             try:
                 name = (cb.get_attribute("name") or "").lower()
@@ -1684,7 +1910,6 @@ class RegistrationController:
                 value = (cb.get_attribute("value") or "").lower()
                 combined = f"{name} {cb_id} {value}"
 
-                # Пропускаем нежелательные чекбоксы
                 if any(skip in combined for skip in checkbox_skip_keywords):
                     logger.debug(f"Пропускаем нежелательный чекбокс: {name or cb_id}")
                     continue
@@ -1693,8 +1918,6 @@ class RegistrationController:
                 if cb_selector in checked_selectors:
                     continue
 
-                # Если шаблон есть — только по ключевым словам
-                # Если шаблона нет — все видимые чекбоксы
                 should_check = (
                     any(kw in combined for kw in agree_keywords)
                     or not template
@@ -1705,7 +1928,7 @@ class RegistrationController:
                         await self.browser.human_click(cb_selector)
                         logger.info(f"Галочка поставлена эвристикой: {cb_selector}")
                         checked_selectors.append(cb_selector)
-                        new_checkboxes.append(cb_selector)
+                        new_checkboxes.append((cb_selector, "heuristic"))
                     except Exception as e:
                         logger.warning(f"Не удалось поставить галочку {cb_selector}: {e}")
 
@@ -1748,19 +1971,8 @@ class RegistrationController:
                 self._last_checkbox_failed = True
         elif not all_checkboxes:
             logger.debug("Чекбоксы на странице не найдены — пропускаем")
-                
-        # Обновляем шаблон новыми чекбоксами сразу
-        if engine_name and new_checkboxes:
-            logger.debug(f"Обновляем шаблон: новые галочки {new_checkboxes}")
-            await self.template_manager.update_template(
-                engine_name=engine_name,
-                new_data={"agree_step": {"checkboxes": new_checkboxes}},
-            )
-            if template:
-                existing_cbs = template.setdefault("agree_step", {}).setdefault("checkboxes", [])
-                for cb in new_checkboxes:
-                    if cb not in existing_cbs:
-                        existing_cbs.append(cb)
+
+        return new_checkboxes
     
     async def _confirm_test_mode(
         self,
@@ -1936,38 +2148,43 @@ class RegistrationController:
         self,
         selectors: dict,
         form_selector: str | None,
-        template: dict | None = None,
-        engine_name: str | None = None,
-    ) -> bool:
+    ) -> tuple[bool, tuple[str, str] | None]:
         """Нажимает кнопку submit. Ручной режим если авто не сработало.
 
         Returns:
-            True если нажата (авто или вручную), False если пропущено/таймаут.
+            Кортеж (ok, found_submit):
+            ok — True если кнопка нажата (авто или вручную), False если таймаут/пропуск.
+            found_submit — (selector, source) если найден новый селектор кнопки,
+                           None если использован селектор из шаблона или ручной режим.
         """
         submit_selector_raw = selectors.get("submit_button")
         if not submit_selector_raw:
-            try:
-                await self._submit_form(selectors, form_selector, template, engine_name)
-                return True
-            except RuntimeError:
-                logger.warning("_submit_form завершился с ошибкой — неудача")
-                return False
+            found_selector = await self._submit_form(selectors, form_selector)
+            if found_selector is None:
+                logger.warning("_submit_form не нашёл кнопку — неудача")
+                return False, None
+            return True, (found_selector, "heuristic")
 
-        submit_list = submit_selector_raw if isinstance(submit_selector_raw, list) else [submit_selector_raw]
+        submit_list = (
+            submit_selector_raw
+            if isinstance(submit_selector_raw, list)
+            else [submit_selector_raw]
+        )
         for sel in submit_list:
             if not sel:
                 continue
             try:
                 await asyncio.wait_for(self.browser.human_click(sel), timeout=4.0)
-                logger.info(f"Кнопка submit нажата: {sel} ")
-                return True
+                logger.info(f"Кнопка submit нажата: {sel}")
+                return True, None
             except Exception as e:
-                # 🔧 НОВОЕ: логируем тип исключения для диагностики
                 exc_type = type(e).__name__
                 exc_msg = str(e) or "(пустое)"
-                logger.debug(f"Кнопка submit недоступна ({sel}): type={exc_type}, message={exc_msg} ")
+                logger.debug(
+                    f"Кнопка submit недоступна ({sel}): "
+                    f"type={exc_type}, message={exc_msg}"
+                )
 
-        # Авто не сработало — ручной режим
         logger.warning("Не удалось нажать кнопку submit авто — запрашиваем ручной ввод")
         submit_label = selectors.get("submit_button_label") or ""
         submit_sel = submit_list[0] if submit_list else ""
@@ -1986,20 +2203,18 @@ class RegistrationController:
             )
             if (confirm or "").strip():
                 logger.info("Ручное нажатие кнопки: пользователь подтвердил")
-                return True
+                return True, None
             logger.warning("Ручное нажатие кнопки пропущено — неудача")
-            return False
+            return False, None
         except asyncio.TimeoutError:
             logger.warning("Таймаут ручного нажатия кнопки — неудача")
-            return False
+            return False, None
             
     async def _submit_form(
         self,
         selectors: dict,
         form_selector: str | None,
-        template: dict | None = None,
-        engine_name: str | None = None,
-    ) -> None:
+    ) -> str | None:
         """Нажимает кнопку подтверждения формы регистрации.
 
         Порядок поиска кнопки:
@@ -2009,21 +2224,18 @@ class RegistrationController:
         4. Поиск по всей странице
         5. Ручной режим
 
-        Обновляет шаблон если найден новый селектор кнопки.
-
         Args:
             selectors: Словарь селекторов полей.
             form_selector: Селектор формы.
-            template: Текущий шаблон (для обновления).
-            engine_name: Название движка (для обновления шаблона).
+
+        Returns:
+            CSS-селектор нажатой кнопки если найдена эвристикой, None в остальных случаях.
         """
         logger.info("=== Отправка формы ===")
 
-        # Загружаем ключевые слова
         common_fields = await self.template_manager.get_common_fields()
         submit_keywords = [k.lower() for k in common_fields.get("submit_keywords", [])]
 
-        # Этап 1: селектор из шаблона/эвристики
         submit_selector_raw = selectors.get("submit_button")
         selectors_list = (
             submit_selector_raw if isinstance(submit_selector_raw, list)
@@ -2041,19 +2253,17 @@ class RegistrationController:
                     timeout=4.0
                 )
                 logger.info(f"Форма отправлена кнопкой из селектора: {sel}")
-                return
+                return None
             except asyncio.TimeoutError:
                 logger.debug(f"Таймаут кнопки: {sel}")
             except Exception as e:
                 logger.debug(f"Кнопка недоступна ({sel}): {e}")
 
-        # Этап 2 и 3: поиск внутри формы — сначала по тексту потом по типу
         found_selector = await self._find_submit_in_form(
             form_selector=form_selector,
             submit_keywords=submit_keywords,
         )
 
-        # Этап 4: если внутри формы не нашли — ищем по всей странице
         if not found_selector:
             logger.debug("Кнопка внутри формы не найдена — ищем по всей странице")
             found_selector = await self._find_submit_on_page(
@@ -2064,28 +2274,13 @@ class RegistrationController:
             try:
                 await self.browser.human_click(found_selector)
                 logger.info(f"Форма отправлена найденной кнопкой: {found_selector}")
-                # Обновляем шаблон новым селектором
-                if engine_name:
-                    logger.debug(f"Обновляем шаблон: submit_button = {found_selector}")
-                    await self.template_manager.update_template(
-                        engine_name=engine_name,
-                        new_data={"fields": {"submit_button": found_selector}},
-                    )
-                    if template:
-                        existing = template.setdefault("fields", {}).get("submit_button")
-                        if isinstance(existing, list):
-                            if found_selector not in existing:
-                                existing.append(found_selector)
-                        else:
-                            template["fields"]["submit_button"] = [found_selector]
-                return
+                return found_selector
             except Exception as e:
                 logger.warning(
                     f"Кнопка найдена ({found_selector}), "
                     f"но нажать не удалось: {e} — переходим в ручной режим"
                 )
 
-        # Этап 5: ручной режим
         logger.warning("Кнопка не найдена ни в форме ни на странице — ручной режим")
         print("\n" + "=" * 60)
         print("НЕ УДАЛОСЬ НАЙТИ КНОПКУ ПОДТВЕРЖДЕНИЯ")
@@ -2099,11 +2294,12 @@ class RegistrationController:
             )
             if not (confirm or "").strip():
                 logger.warning("Ручное подтверждение формы пропущено — неудача")
-                raise RuntimeError("manual_fill_timeout")
+                return None
             logger.info("Ручное подтверждение: пользователь нажал Enter")
+            return None
         except asyncio.TimeoutError:
             logger.error("Таймаут ручного подтверждения формы")
-            raise RuntimeError("manual_fill_timeout")
+            return None
     
     async def _find_button_in_context(
         self,
@@ -2736,5 +2932,41 @@ class RegistrationController:
         except Exception as e:
             logger.warning(f"Ошибка генерации CSS-селектора: {e}")
             return "unknown"
-        
-        
+
+    @classmethod
+    def _is_dynamic_selector(cls, sel: str) -> bool:
+        """Проверяет является ли CSS-селектор динамическим (нестабильным).
+
+        Динамические селекторы генерируются случайно при каждой сессии
+        и не должны сохраняться в шаблон — при следующем запуске они
+        уже недействительны.
+
+        Паттерны:
+        - XenForo MD5: ``#ctrl_`` + ровно 32 hex-символа
+        - Чистый hex-ID: ``#`` + 16 и более hex-символов
+        - Расширяемые префиксы из ``DYNAMIC_ID_PREFIXES`` + hex-суффикс ≥ 8 символов
+
+        Args:
+            sel: CSS-селектор для проверки.
+
+        Returns:
+            True если селектор динамический, False если стабильный.
+        """
+        if not sel:
+            return False
+
+        if cls._PATTERN_CTRL_HASH.match(sel):
+            return True
+
+        if cls._PATTERN_HEX_ID.match(sel):
+            return True
+
+        for prefix in cls.DYNAMIC_ID_PREFIXES:
+            if sel.startswith(prefix):
+                suffix = sel[len(prefix):]
+                if re.match(r"^[a-f0-9\-]{8,}$", suffix, re.IGNORECASE):
+                    return True
+
+        return False
+    
+    
