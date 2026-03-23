@@ -37,8 +37,17 @@
     "city", "town", "location", "город", "населённый пункт", "место", "откуда", "регион"
   ],
   "birthdate_keywords": [
-    "birth", "birthday", "dob", "born", "дата рождения", "день рождения", "возраст",
-    "bday", "birthdate", "birth_date", "date_of_birth"
+    "birth", "birthday", "birthdate", "birth_date", "date_of_birth",
+    "дата рождения", "возраст"
+  ],
+  "dob_day_keywords": [
+    "day", "день"
+  ],
+  "dob_month_keywords": [
+    "month", "месяц"
+  ],
+  "dob_year_keywords": [
+    "year", "год"
   ],
   "gender_keywords": [
     "gender", "sex", "пол"

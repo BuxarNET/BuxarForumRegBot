@@ -1479,6 +1479,9 @@ class RegistrationController:
                     "website":   account_data.get("website"),
                     "timezone":  account_data.get("timezone"),
                     "birthdate": account_data.get("birthdate"),
+                    "dob_day":   account_data.get("dob_day"),
+                    "dob_month": account_data.get("dob_month"),
+                    "dob_year":  account_data.get("dob_year"),
                 }
                 auto_value = known_field_map.get(field_name)
 
@@ -1651,6 +1654,23 @@ class RegistrationController:
             tag = (element.get_attribute("tagName") or "").lower()
             current_val = (element.get_attribute("value") or "").strip()
 
+            # Уточняем tagName через JS если не определён — для select без id
+            if not tag or tag == "input":
+                try:
+                    sel_js_tag = json.dumps(selector)
+                    tag_response = await self.page.execute_script(
+                        f"return document.querySelector({sel_js_tag})"
+                        f"?.tagName?.toLowerCase() || null"
+                    )
+                    tag_from_js = (
+                        tag_response.get("result", {}).get("result", {}).get("value") or ""
+                    )
+                    if tag_from_js:
+                        tag = tag_from_js
+                        logger.debug(f"tagName уточнён через JS: '{tag}' для '{selector}'")
+                except Exception as e:
+                    logger.debug(f"Не удалось уточнить tagName через JS: {e}")
+
             # Проверка видимости и доступности через JS —
             # покрывает все способы скрытия: disabled, aria-disabled,
             # display:none, visibility:hidden, opacity:0, pointer-events:none,
@@ -1781,18 +1801,22 @@ class RegistrationController:
         try:
             selector_js = _json.dumps(selector)
 
-            # Получаем все опции через JS
+            # Получаем все опции через JS — сериализуем в JSON строку
             response = await self.page.execute_script(f"""
                 var el = document.querySelector({selector_js});
                 if (!el) return null;
-                return Array.from(el.options).map(function(o) {{
+                return JSON.stringify(Array.from(el.options).map(function(o) {{
                     return {{value: o.value, text: o.text.trim()}};
-                }});
+                }}));
             """)
-            options_raw = (
-                response.get("result", {}).get("result", {}).get("value") or []
+            options_raw_str = (
+                response.get("result", {}).get("result", {}).get("value") or ""
             )
-            options: list[dict] = options_raw if isinstance(options_raw, list) else []
+            try:
+                options: list[dict] = json.loads(options_raw_str) if options_raw_str else []
+            except (json.JSONDecodeError, TypeError):
+                options = []
+            logger.debug(f"Select '{field_name}': найдено опций={len(options)}")
             option_texts: list[str] = [o["text"] for o in options if o.get("text")]
 
             # Пустой список — элемент возможно ещё не загружен
@@ -1803,10 +1827,14 @@ class RegistrationController:
                 )
                 return "not_found", []
 
-            # Ищем частичное совпадение (регистр игнорируем)
+            # Ищем совпадение по тексту опции или по значению (регистр игнорируем)
             value_lower = value.lower()
             matched = next(
-                (o for o in options if value_lower in o.get("text", "").lower()),
+                (
+                    o for o in options
+                    if value_lower in o.get("text", "").lower()
+                    or value_lower == o.get("value", "").lower()
+                ),
                 None,
             )
 

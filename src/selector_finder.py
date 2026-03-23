@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 
 import aiofiles
@@ -64,8 +65,13 @@ class SelectorFinder:
     def _get_element_attrs(self, element) -> dict:
         """Получает атрибуты элемента через get_attribute (не async в Pydoll)."""
         try:
-            # 🔧 ИСПРАВЛЕНИЕ: надёжное определение tagName
             tag_name = element.get_attribute("tagName")
+            if not tag_name:
+                outer = element.get_attribute("outerHTML")
+                if outer:
+                    match = re.match(r"<([a-z]+)", outer.lower())
+                    if match:
+                        tag_name = match.group(1)
             if not tag_name:
                 el_type = (element.get_attribute("type") or "").lower()
                 el_value = element.get_attribute("value")
@@ -86,17 +92,26 @@ class SelectorFinder:
             logger.warning(f"Ошибка получения атрибутов: {e}")
             return {"type": "", "name": "", "id": "", "placeholder": "", "value": "", "tagName": "input", "label": ""}
 
-    def _generate_css_selector(self, element) -> str:
-        """Генерирует уникальный CSS-селектор для элемента (не async)."""
+    def _generate_css_selector(self, element, attrs: dict | None = None) -> str:
+        """Генерирует уникальный CSS-селектор для элемента (не async).
+
+        Args:
+            element: элемент Pydoll.
+            attrs: уже вычисленные атрибуты элемента из _get_element_attrs.
+                   Если переданы — используются для определения tagName
+                   вместо повторного get_attribute (надёжнее для select без id).
+        """
         try:
             el_id = element.get_attribute("id")
             if el_id:
                 return f"#{el_id}"
 
-            # 🔧 ИСПРАВЛЕНИЕ: надёжное определение tagName
-            tag = element.get_attribute("tagName")
+            if attrs:
+                tag = attrs.get("tagName") or ""
+            else:
+                tag = element.get_attribute("tagName") or ""
+
             if not tag:
-                # Эвристика: button[type=submit] без value
                 el_type = (element.get_attribute("type") or "").lower()
                 el_value = element.get_attribute("value")
                 if el_type == "submit" and not el_value:
@@ -628,7 +643,33 @@ class SelectorFinder:
         for element in inputs:
             try:
                 attrs = self._get_element_attrs(element)
-                selector = self._generate_css_selector(element)
+
+                # Уточняем tagName через JS если не определён — для select, textarea без id
+                if attrs.get("tagName") in (None, "input"):
+                    el_name = attrs.get("name") or ""
+                    el_id_val = attrs.get("id") or ""
+                    js_sel = (
+                        f'"#{el_id_val}"' if el_id_val
+                        else f'"[name=\\"{el_name}\\"]"' if el_name
+                        else None
+                    )
+                    if js_sel:
+                        try:
+                            response = await self.page.execute_script(
+                                f"return document.querySelector({js_sel})"
+                                f"?.tagName?.toLowerCase() || null"
+                            )
+                            tag = response.get("result", {}).get("result", {}).get("value")
+                            if tag:
+                                attrs["tagName"] = tag
+                                logger.debug(
+                                    f"tagName уточнён через JS: '{tag}' "
+                                    f"для '{el_name or el_id_val}'"
+                                )
+                        except Exception as e:
+                            logger.debug(f"Не удалось получить tagName через JS: {e}")
+
+                selector = self._generate_css_selector(element, attrs)
                 display_text = await self._get_display_text(element)
 
                 field_type = (attrs.get("type") or "text").lower()
@@ -742,15 +783,18 @@ class SelectorFinder:
 
                 # Определяем тип по ключевым словам
                 known_field_types = [
-                    ("city", self.common_fields.get("city_keywords", [])),
+                    ("dob_day",   self.common_fields.get("dob_day_keywords", [])),
+                    ("dob_month", self.common_fields.get("dob_month_keywords", [])),
+                    ("dob_year",  self.common_fields.get("dob_year_keywords", [])),
+                    ("city",      self.common_fields.get("city_keywords", [])),
                     ("birthdate", self.common_fields.get("birthdate_keywords", [])),
-                    ("gender", self.common_fields.get("gender_keywords", [])),
+                    ("gender",    self.common_fields.get("gender_keywords", [])),
                     ("firstname", self.common_fields.get("firstname_keywords", [])),
-                    ("lastname", self.common_fields.get("lastname_keywords", [])),
-                    ("phone", self.common_fields.get("phone_keywords", [])),
-                    ("website", self.common_fields.get("website_keywords", [])),
-                    ("country", self.common_fields.get("country_keywords", [])),
-                    ("timezone", self.common_fields.get("timezone_keywords", [])),
+                    ("lastname",  self.common_fields.get("lastname_keywords", [])),
+                    ("phone",     self.common_fields.get("phone_keywords", [])),
+                    ("website",   self.common_fields.get("website_keywords", [])),
+                    ("country",   self.common_fields.get("country_keywords", [])),
+                    ("timezone",  self.common_fields.get("timezone_keywords", [])),
                 ]
 
                 matched_type = None
