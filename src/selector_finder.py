@@ -597,6 +597,7 @@ class SelectorFinder:
         confirm_keywords = [k.lower() for k in self.common_fields.get("confirm_password_keywords", [])]
         confirm_email_keywords = [k.lower() for k in self.common_fields.get("confirm_email_keywords", [])]
         register_radio_keywords = [k.lower() for k in self.common_fields.get("register_radio_keywords", [])]
+        honeypot_keywords: list[str] = [k.lower() for k in self.common_fields.get("honeypot_keywords", [])]
 
         # Получаем все поля формы
         try:
@@ -688,6 +689,34 @@ class SelectorFinder:
                 if "display:none" in style or "visibility:hidden" in style:
                     logger.debug(f"Пропускаем невидимое поле: {selector}")
                     continue
+
+                # Honeypot-проверка: поле является ловушкой если родительский контейнер
+                # имеет класс "limited" (XenForo) или текст <p class="explain">
+                # содержит слово из honeypot_keywords (универсальная проверка)
+                try:
+                    js_selector: str = json.dumps(selector)
+                    hp_response: dict = await self.page.execute_script(
+                        f"var el=document.querySelector({js_selector});"
+                        f"if(!el)return null;"
+                        f"var p=el.closest('dl,div,li,td');"
+                        f"return JSON.stringify({{parentClass:p?p.className:'',"
+                        f"explainText:p?(p.querySelector('.explain')||{{textContent:''}}).textContent||'':''}});"
+                    )
+                    hp_raw: str | None = hp_response.get("result", {}).get("result", {}).get("value")
+                    if hp_raw:
+                        hp_data: dict | None = json.loads(hp_raw)
+                        if hp_data is not None:
+                            parent_class: str = (hp_data.get("parentClass") or "").lower()
+                            explain_text: str = (hp_data.get("explainText") or "").lower()
+                            is_honeypot: bool = (
+                                "limited" in parent_class
+                                or any(kw in explain_text for kw in honeypot_keywords)
+                            )
+                            if is_honeypot:
+                                logger.debug(f"Honeypot-поле пропущено: {selector}")
+                                continue
+                except Exception as e:
+                    logger.debug(f"Ошибка проверки honeypot для '{selector}': {e}")
 
                 # Password поля
                 if field_type == "password":

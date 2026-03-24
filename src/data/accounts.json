@@ -28,9 +28,15 @@
       "birthdate": [
         "01.09.1990"
       ],
-      "dob_month": ["9"],
-      "dob_day": ["1"],
-      "dob_year": ["1990"],
+      "dob_month": [
+        "9"
+      ],
+      "dob_day": [
+        "1"
+      ],
+      "dob_year": [
+        "1990"
+      ],
       "phone": null,
       "website": null,
       "occupation": null,
@@ -52,7 +58,7 @@
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-03-19T21:48:11",
+    "last_attempt": "2026-03-24T15:42:28",
     "last_error": {
       "reason": "no_form_detected",
       "proxy_used": null
