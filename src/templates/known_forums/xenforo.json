@@ -24,6 +24,9 @@
       "#pageLogin",
       [
         "#pageLogin"
+      ],
+      [
+        "input"
       ]
     ]
   },
@@ -53,7 +56,8 @@
       "input[name='password_confirm']"
     ],
     "agree_checkbox": [
-      "input[name='agree']"
+      "input[name='agree']",
+      "#ctrl_agree"
     ],
     "submit_button": [
       "button[type='submit']"
@@ -73,18 +77,48 @@
   },
   "custom_fields": [],
   "success_indicators": [
-    "thank you for registering",
-    "account has been created",
+    "registration complete",
+    "your account has been created",
     "account created",
     "check your email",
     "activation link",
-    "confirmation email"
+    "confirmation email",
+    "активировать",
+    "активации",
+    "письмо",
+    "подтвердите регистрацию",
+    "спасибо за регистрацию",
+    "регистрация завершена",
+    "на вашу почту",
+    "отправлено письмо",
+    "проверьте email",
+    "вам выслано письмо",
+    "активационная ссылка",
+    "завершена регистрация",
+    "verify your email",
+    "welcome",
+    "thank you for registering"
   ],
   "error_indicators": [
-    "username is already taken",
-    "email already exists",
+    "username already exists",
+    "email address is already registered",
     "already taken",
     "already exists",
+    "уже зарегистрирован",
+    "занято",
+    "ошибка",
+    "already registered",
+    "username taken",
+    "email already",
+    "invalid username",
+    "invalid email",
+    "уже существует",
+    "существует пользователь",
+    "username already taken",
+    "имя пользователя занято",
+    "пользователь с таким именем",
+    "извините, пользователь",
+    "sorry, username",
     "taken",
     "exists"
   ]

@@ -598,6 +598,12 @@ class SelectorFinder:
         confirm_email_keywords = [k.lower() for k in self.common_fields.get("confirm_email_keywords", [])]
         register_radio_keywords = [k.lower() for k in self.common_fields.get("register_radio_keywords", [])]
         honeypot_keywords: list[str] = [k.lower() for k in self.common_fields.get("honeypot_keywords", [])]
+        skip_field_classes_set: set[str] = {
+            k.lower() for k in self.common_fields.get("skip_field_classes", [])
+        }
+        service_field_keywords: list[str] = [
+            k.lower() for k in self.common_fields.get("service_field_keywords", [])
+        ]
 
         # Получаем все поля формы
         try:
@@ -717,6 +723,49 @@ class SelectorFinder:
                                 continue
                 except Exception as e:
                     logger.debug(f"Ошибка проверки honeypot для '{selector}': {e}")
+
+                # Пропускаем поля скрытые через родителя или помеченные классами
+                # авто-заполнения (OptOut, AutoTimeZone и др. из skip_field_classes)
+                try:
+                    sf_response: dict = await self.page.execute_script(
+                        f"var el=document.querySelector({json.dumps(selector)});"
+                        f"if(!el)return null;"
+                        f"var p=el.closest('dl,div,li,td');"
+                        f"return JSON.stringify({{"
+                        f"parentStyle:p?p.getAttribute('style')||'':'',"
+                        f"parentClass:p?p.className||'':'',"
+                        f"elementClass:el.className||''"
+                        f"}});"
+                    )
+                    sf_raw: str | None = sf_response.get("result", {}).get("result", {}).get("value")
+                    if sf_raw:
+                        try:
+                            sf_data: dict | None = json.loads(sf_raw)
+                        except (json.JSONDecodeError, TypeError):
+                            sf_data = None
+                        if sf_data is not None:
+                            parent_style: str = re.sub(r'\s+', '', (sf_data.get("parentStyle") or "").lower())
+                            parent_class: str = (sf_data.get("parentClass") or "").lower()
+                            element_class: str = (sf_data.get("elementClass") or "").lower()
+                            parent_classes_set: set[str] = set(parent_class.split())
+                            element_classes_set: set[str] = set(element_class.split())
+                            has_skip_class: bool = bool(
+                                parent_classes_set & skip_field_classes_set
+                                or element_classes_set & skip_field_classes_set
+                            )
+                            if "display:none" in parent_style or has_skip_class:
+                                logger.debug(f"Пропускаем скрытое/авто поле: {selector}")
+                                continue
+                except Exception as e:
+                    logger.debug(f"Ошибка проверки skip_field для '{selector}': {e}")
+
+                # Пропускаем служебные поля капч (g-recaptcha-response, hCaptcha, Turnstile)
+                # Проверка по id, name, class элемента (display_text исключён для избежания ложных срабатываний)
+                element_class: str = (attrs.get("class") or "").lower()
+                field_combined: str = f"{name} {el_id} {element_class}"
+                if any(kw in field_combined for kw in service_field_keywords):
+                    logger.debug(f"Служебное поле капчи пропущено: {selector}")
+                    continue
 
                 # Password поля
                 if field_type == "password":

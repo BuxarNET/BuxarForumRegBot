@@ -11,7 +11,7 @@
   ],
   "username_keywords": [
     "user", "login", "nick", "username", "handle", "псевдоним",
-    "логин", "никнейм", "пользователь", "юзер", "ник"
+    "логин", "никнейм", "пользователь", "юзер", "ник", "имя"
   ],
   "email_keywords": [
     "email", "mail", "e-mail", "почта", "эл.почта", "электронная", "емейл"
@@ -87,5 +87,23 @@
   "register_radio_keywords": [
     "register", "sign up", "зарегистрироваться", "регистрация",
     "нет, зарегистрироваться", "create account", "новый пользователь"
+  ],
+  "honeypot_keywords": [
+    "оставьте это поле пустым",
+    "оставьте поле пустым",
+    "leave this field empty",
+    "leave blank",
+    "leave this blank",
+    "не заполнять",
+    "honeypot"
+  ],
+  "skip_field_classes": [
+    "AutoTimeZone",
+    "AutoValidator",
+    "Disabler",
+    "AutoComplete"
+  ],
+  "service_field_keywords": [
+    "response"
   ]
 }
