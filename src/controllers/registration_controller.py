@@ -2182,10 +2182,16 @@ class RegistrationController:
         Returns:
             Кортеж (ok, found_submit):
             ok — True если кнопка нажата (авто или вручную), False если таймаут/пропуск.
-            found_submit — (selector, source) если найден новый селектор кнопки,
-                           None если использован селектор из шаблона или ручной режим.
+                found_submit — (selector, source) если кнопка нажата автоматически;
+                               фильтрация дублей (source == "template") выполняется 
+                               в _save_block_to_template() через _check_source();
+                               None — если не удалось нажать или пользователь пропустил.
         """
         submit_selector_raw = selectors.get("submit_button")
+        
+        # Получаем source для возврата (привязан к полю, не к конкретному селектору)
+        submit_source = selectors.get("submit_button_source", "template")
+        
         if not submit_selector_raw:
             found_selector = await self._submit_form(selectors, form_selector)
             if found_selector is None:
@@ -2204,7 +2210,9 @@ class RegistrationController:
             try:
                 await asyncio.wait_for(self.browser.human_click(sel), timeout=4.0)
                 logger.info(f"Кнопка submit нажата: {sel}")
-                return True, None
+                # Возвращаем (sel, source) даже для template-селекторов:
+                # фильтрация дублей происходит в _save_block_to_template() через _check_source()
+                return True, (sel, submit_source)
             except Exception as e:
                 exc_type = type(e).__name__
                 exc_msg = str(e) or "(пустое)"
@@ -2231,6 +2239,7 @@ class RegistrationController:
             )
             if (confirm or "").strip():
                 logger.info("Ручное нажатие кнопки: пользователь подтвердил")
+                # Ручной ввод не сохраняем в шаблон — нет гарантии правильности
                 return True, None
             logger.warning("Ручное нажатие кнопки пропущено — неудача")
             return False, None
