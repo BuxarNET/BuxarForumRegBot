@@ -1216,13 +1216,32 @@ class RegistrationController:
         agree_keywords = [k.lower() for k in common_fields.get("agree_keywords", [])]
         checkbox_skip_keywords = [k.lower() for k in common_fields.get("checkbox_skip_keywords", [])]
         one_time_field_keywords = [k.lower() for k in common_fields.get("one_time_field_keywords", [])]
+        
+        known_field_map: dict[str, list[str] | str | None] = {
+            "city":      account_data.get("city"),
+            "country":   account_data.get("country"),
+            "gender":    account_data.get("gender"),
+            "firstname": account_data.get("firstname"),
+            "lastname":  account_data.get("lastname"),
+            "phone":     account_data.get("phone"),
+            "website":   account_data.get("website"),
+            "timezone":  account_data.get("timezone"),
+            "birthdate": account_data.get("birthdate"),
+            "dob_day":   account_data.get("dob_day"),
+            "dob_month": account_data.get("dob_month"),
+            "dob_year":  account_data.get("dob_year"),
+        }
 
         # Шаг 0: radio-кнопка регистрации
         # Должен выполняться до заполнения полей — на XenForo выбор radio
         # меняет доступность полей формы (username/email/password становятся активными)
         # ── ШАГ 0.1: register_radio (однократно, шлюз формы) ───────────────────────────
         logger.info("Шаг 0.1: обработка radio-кнопки регистрации")
+        
+        processed_names: set[str] = set()
+        
         register_radio_selector = selectors.get("register_radio")
+        
         if not register_radio_selector:
             logger.debug("radio-кнопка регистрации не найдена в блоке — пропускаем Шаг 0.1")
         else:
@@ -1258,10 +1277,11 @@ class RegistrationController:
                         radio_clicked = True
                         logger.info("radio регистрации подтверждена оператором")
     
-            # Добавляем в processed_names для защиты от повторной обработки в цикле 0.2
-            processed_names = {"register_radio"} if "register_radio" in filled_fields else set()
             if not radio_clicked and radio_source != "template":
                 logger.debug("radio регистрации не нажата — продолжаем заполнение")
+    
+            if "register_radio" in filled_fields:
+                processed_names.add("register_radio")
     
         # ── ШАГ 0.2: Цикл итеративной обработки каскадных radio ───────────────────────
         if form_selector:
@@ -1317,20 +1337,30 @@ class RegistrationController:
                         if not field_name or not group_sel:
                             continue
     
-                        # Поиск значения в профиле (прямое совпадение, без хардкода)
+                        # ✅ УНИФИЦИРОВАННЫЙ ПЕРЕБОР: аналогично Шаге 1
                         value = None
-                        profile_val = account_data.get("custom_fields", {}).get(field_name) or account_data.get(field_name)
-                        if profile_val:
-                            raw_val = profile_val[0] if isinstance(profile_val, list) else profile_val
-                            matched = next(
-                                (o for o in options if str(o.get("value")).lower() == str(raw_val).lower() or
-                                               str(o.get("text")).lower() == str(raw_val).lower()),
-                                None
-                            )
-                            if matched:
-                                value = matched.get("value")
+                        auto_value = known_field_map.get(field_name)
     
-                        # Ручной ввод, если значение не найдено
+                        if auto_value:
+                            # Превращаем значение в список для перебора (даже если это одна строка)
+                            values_to_try = auto_value if isinstance(auto_value, list) else [auto_value]
+    
+                            for v in values_to_try:
+                                logger.debug(f"Radio '{field_name}': пробуем вариант '{v}' из профиля")
+                                
+                                # Ищем совпадение по value или text
+                                matched = next(
+                                    (o for o in options if str(o.get("value")).lower() == str(v).lower() or
+                                                   str(o.get("text")).lower() == str(v).lower()),
+                                    None
+                                )
+                                
+                                if matched:
+                                    value = matched.get("value")
+                                    logger.info(f"Radio '{field_name}': найдено совпадение для '{v}' → value='{value}'")
+                                    break  # Успешно нашли вариант, выходим из цикла
+    
+                        # Ручной ввод запрашивается ТОЛЬКО если ни один вариант из профиля не подошёл
                         manual_input = None
                         if not value and options:
                             hints = " | ".join([f"{o.get('value')} ({o.get('text', '')})" for o in options if o.get('text')])
@@ -1345,7 +1375,7 @@ class RegistrationController:
                                 value = next(
                                     (o.get("value") for o in options
                                      if str(o.get("value")).lower() == manual_input.lower() or str(o.get("text")).lower() == manual_input.lower()),
-                                    manual_input  # fallback
+                                    manual_input  # fallback: используем ввод как есть
                                 )
     
                         # Клик по опции
@@ -1606,20 +1636,6 @@ class RegistrationController:
 
             else:
                 # п.3: автоопределение через known_field_types
-                known_field_map: dict[str, str | None] = {
-                    "city":      account_data.get("city"),
-                    "country":   account_data.get("country"),
-                    "gender":    account_data.get("gender"),
-                    "firstname": account_data.get("firstname"),
-                    "lastname":  account_data.get("lastname"),
-                    "phone":     account_data.get("phone"),
-                    "website":   account_data.get("website"),
-                    "timezone":  account_data.get("timezone"),
-                    "birthdate": account_data.get("birthdate"),
-                    "dob_day":   account_data.get("dob_day"),
-                    "dob_month": account_data.get("dob_month"),
-                    "dob_year":  account_data.get("dob_year"),
-                }
                 auto_value = known_field_map.get(field_name)
 
                 if auto_value and not is_one_time:

@@ -826,30 +826,26 @@ class SelectorFinder:
 
                 # Radio-кнопки
                 if field_type == "radio":
+                    # 1. register_radio (шлюз формы)
                     if any(kw in combined for kw in register_radio_keywords):
                         if "register_radio" not in result:
                             result["register_radio"] = selector
                             result["register_radio_value"] = attrs.get("value", "")
                             if display_text:
                                 result["register_radio_label"] = display_text
-                            logger.debug(
-                                f"Определён register_radio: {selector} | "
-                                f"value='{attrs.get('value', '')}' | '{display_text}'"
-                            )
+                            logger.debug(f"Определён register_radio: {selector} | '{display_text}'")
                         else:
-                            logger.warning(
-                                f"Найдено несколько radio регистрации — "
-                                f"пропускаем: {selector} | '{display_text}'"
-                            )
-                        continue  # ✅ Прерываем ТОЛЬКО для register_radio
-    
-                    # Все остальные radio (gender, подписки и т.д.)
+                            logger.warning(f"Дубликат register_radio пропущен: {selector}")
+                        continue  # Не идём дальше
+                
+                    # 2. Все остальные radio (gender, подписки, ...)
                     radio_name = attrs.get("name") or attrs.get("id")
                     if not radio_name:
-                        continue  # Пропускаем radio без имени/ID
-    
+                        continue  # Без имени не обработаем группу
+                
                     group_selector = f"input[name='{radio_name}']"
-                    # Собираем опции через JS (безопасно, JSON.stringify)
+                
+                    # Собираем опции (один раз на группу)
                     try:
                         js_sel = json.dumps(group_selector)
                         opts_js = f"""
@@ -867,12 +863,10 @@ class SelectorFinder:
                     except Exception as e:
                         logger.debug(f"Не удалось собрать опции radio {group_selector}: {e}")
                         options = []
-    
-                    # Защита от дубликатов в custom_fields
-                    if not any(
-                        f.get("name") == radio_name and f.get("type") == "radio"
-                        for f in result["custom_fields"]
-                    ):
+                
+                    # Защита от дубликатов (одна группа на name)
+                    if not any(f.get("name") == radio_name and f.get("type") == "radio" for f in result["custom_fields"]):
+                        # Определяем семантический тип через known_field_types
                         matched_type = next(
                             (tn for tn, kw in known_field_types if any(k.lower() in combined for k in kw)),
                             None
@@ -885,7 +879,7 @@ class SelectorFinder:
                             "display_text": display_text,
                         })
                         logger.debug(f"Добавлена radio-группа: {matched_type or radio_name} ({group_selector})")
-                    continue  # ✅ Явно прерываем, не проваливаемся в email/username
+                    continue  # Не проваливаемся в email/username
 
                 # Email поля
                 if field_type == "email" or any(kw in combined for kw in email_keywords):
