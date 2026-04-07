@@ -1220,16 +1220,16 @@ class RegistrationController:
         # Шаг 0: radio-кнопка регистрации
         # Должен выполняться до заполнения полей — на XenForo выбор radio
         # меняет доступность полей формы (username/email/password становятся активными)
-        logger.info("Шаг 0: обработка radio-кнопки регистрации")
+        # ── ШАГ 0.1: register_radio (однократно, шлюз формы) ───────────────────────────
+        logger.info("Шаг 0.1: обработка radio-кнопки регистрации")
         register_radio_selector = selectors.get("register_radio")
         if not register_radio_selector:
-            logger.debug("radio-кнопка регистрации не найдена в блоке — пропускаем Шаг 0")
+            logger.debug("radio-кнопка регистрации не найдена в блоке — пропускаем Шаг 0.1")
         else:
             radio_source = selectors.get("register_radio_source", "manual")
             radio_clicked = False
-
+    
             if radio_source == "template":
-                # Значение из шаблона — кликаем без запроса
                 try:
                     await self.browser.human_click(register_radio_selector)
                     await asyncio.sleep(0.5)
@@ -1238,24 +1238,15 @@ class RegistrationController:
                     logger.info(f"radio регистрации нажата (шаблон): {register_radio_selector}")
                 except Exception as e:
                     logger.warning(f"Не удалось нажать radio регистрации ({register_radio_selector}): {e}")
-
             elif radio_source in ("common_fields", "manual"):
-                # common_fields или manual — пробуем кликнуть
                 try:
                     await self.browser.human_click(register_radio_selector)
                     await asyncio.sleep(0.5)
                     filled_fields.append("register_radio")
                     radio_clicked = True
-                    logger.info(
-                        f"radio регистрации нажата "
-                        f"({'common_fields' if radio_source == 'common_fields' else 'ручной ввод'}): "
-                        f"{register_radio_selector}"
-                    )
+                    logger.info(f"radio регистрации нажата ({radio_source}): {register_radio_selector}")
                 except Exception as e:
-                    logger.warning(
-                        f"Не удалось нажать radio регистрации ({register_radio_selector}): {e} "
-                        f"— запрашиваем ручной ввод"
-                    )
+                    logger.warning(f"Не удалось нажать radio регистрации ({register_radio_selector}): {e}")
                     manual_confirm = await self._ask_manual_input(
                         field_name="register_radio",
                         selector_hint=register_radio_selector,
@@ -1263,18 +1254,159 @@ class RegistrationController:
                         display_text=selectors.get("register_radio_label", ""),
                     )
                     if manual_confirm:
-                        # Оператор подтвердил выбор — фиксируем как заполненное
                         filled_fields.append("register_radio")
                         radio_clicked = True
-                        logger.info(
-                            f"radio регистрации успешно подтверждена оператором: "
-                            f"{register_radio_selector}"
-                        )
-                    else:
-                        logger.info("radio регистрации пропущена оператором — продолжаем")
-
+                        logger.info("radio регистрации подтверждена оператором")
+    
+            # Добавляем в processed_names для защиты от повторной обработки в цикле 0.2
+            processed_names = {"register_radio"} if "register_radio" in filled_fields else set()
             if not radio_clicked and radio_source != "template":
                 logger.debug("radio регистрации не нажата — продолжаем заполнение")
+    
+        # ── ШАГ 0.2: Цикл итеративной обработки каскадных radio ───────────────────────
+        if form_selector:
+            iteration = 0
+            MAX_ITER = 5
+            prev_input_count = 0
+    
+            while iteration < MAX_ITER:
+                # ── ШАГ 0.2.1: Подсчёт видимых input (детектор «тихого обновления») ──
+                try:
+                    count_js = f"""
+                        return document.querySelectorAll('{form_selector} input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset])').length
+                    """
+                    resp = await self.page.execute_script(count_js)
+                    current_input_count = resp.get("result", {}).get("result", {}).get("value", 0)
+    
+                    # ── ШАГ 0.2.2: Повторный identify_fields для актуальных radio ───
+                    form_el = await self.page.query(form_selector, timeout=3, raise_exc=False)
+                    if not form_el:
+                        logger.warning("Форма исчезла во время обработки radio → выход")
+                        break
+    
+                    current_fields = await self.selector_finder.identify_fields(form_el)
+    
+                    # ── ШАГ 0.2.3: Фильтрация НОВЫХ radio-групп ─────────────────────
+                    new_radios = [
+                        f for f in current_fields.get("custom_fields", [])
+                        if isinstance(f, dict) and f.get("type") == "radio" and f.get("name") not in processed_names
+                    ]
+                    current_radio_count = sum(
+                        1 for f in current_fields.get("custom_fields", [])
+                        if isinstance(f, dict) and f.get("type") == "radio"
+                    )
+    
+                    # ── ШАГ 0.2.4: Логика выхода из цикла ───────────────────────────
+                    if not new_radios:
+                        expected_count = len(processed_names) - (1 if "register_radio" in processed_names else 0)
+                        if current_radio_count == expected_count:
+                            logger.debug("Все radio-группы обработаны, новых не появилось → выход")
+                            break
+                        if current_input_count == prev_input_count:
+                            logger.debug("Нет новых radio и input count не изменился → выход")
+                            break
+                        # ── ШАГ 0.3: Детектор «тихого обновления» ───────────────────
+                        logger.info("Радио кончились, но DOM изменился → переход к синхронизации 0.5")
+                        break
+    
+                    # ── ШАГ 0.2.5: Обработка найденных групп ────────────────────────
+                    for rg in new_radios:
+                        field_name = rg.get("name", "unknown_radio")
+                        group_sel = rg.get("selector", "")
+                        options = rg.get("options", [])
+                        if not field_name or not group_sel:
+                            continue
+    
+                        # Поиск значения в профиле (прямое совпадение, без хардкода)
+                        value = None
+                        profile_val = account_data.get("custom_fields", {}).get(field_name) or account_data.get(field_name)
+                        if profile_val:
+                            raw_val = profile_val[0] if isinstance(profile_val, list) else profile_val
+                            matched = next(
+                                (o for o in options if str(o.get("value")).lower() == str(raw_val).lower() or
+                                               str(o.get("text")).lower() == str(raw_val).lower()),
+                                None
+                            )
+                            if matched:
+                                value = matched.get("value")
+    
+                        # Ручной ввод, если значение не найдено
+                        manual_input = None
+                        if not value and options:
+                            hints = " | ".join([f"{o.get('value')} ({o.get('text', '')})" for o in options if o.get('text')])
+                            manual_input = await self._ask_manual_input(
+                                field_name=field_name,
+                                selector_hint=group_sel,
+                                hint=f"Введите значение или точный текст. Варианты: {hints or 'см. браузер'}",
+                                display_text=rg.get("display_text", ""),
+                                options=[o.get("text", "") for o in options if o.get("text")],
+                            )
+                            if manual_input:
+                                value = next(
+                                    (o.get("value") for o in options
+                                     if str(o.get("value")).lower() == manual_input.lower() or str(o.get("text")).lower() == manual_input.lower()),
+                                    manual_input  # fallback
+                                )
+    
+                        # Клик по опции
+                        if value:
+                            try:
+                                safe_val = str(value).replace("'", "\\'")
+                                click_sel = f"{group_sel}[value='{safe_val}']" if "value=" not in group_sel else group_sel
+    
+                                # Проверка .checked перед кликом
+                                check_js = f"return document.querySelector({json.dumps(click_sel)})?.checked || false;"
+                                is_checked = (await self.page.execute_script(check_js)).get("result", {}).get("result", {}).get("value", False)
+    
+                                if not is_checked:
+                                    await self.browser.human_click(click_sel)
+                                    await asyncio.sleep(0.4)  # Стабилизация DOM после клика
+    
+                                filled_fields.append(field_name)
+                                # Добавляем в filled_from_outside ТОЛЬКО при ручном вводе (после успешного клика)
+                                if manual_input:
+                                    filled_from_outside.append(field_name)
+    
+                                # Безопасное сохранение в профиль (добавление, не перезапись)
+                                cf_dict = account_data.setdefault("custom_fields", {})
+                                cf_list = cf_dict.setdefault(field_name, [])
+                                if str(value) not in cf_list:
+                                    cf_list.append(str(value))
+    
+                                logger.info(f"Radio '{field_name}' установлен в '{value}'")
+                            except Exception as e:
+                                logger.warning(f"Ошибка клика radio '{field_name}': {e}")
+                                skipped_fields.append(field_name)
+    
+                        processed_names.add(field_name)
+    
+                    # ── ШАГ 0.4: Подготовка к следующей итерации ─────────────────────
+                    prev_input_count = current_input_count
+                    iteration += 1
+    
+                except Exception as e:
+                    logger.warning(f"Ошибка в цикле обработки radio (итерация {iteration}): {e}")
+                    break
+    
+        # ── ШАГ 0.5: Финальная синхронизация DOM после обработки radio ───────────────
+        logger.info("Шаг 0.5: Синхронизация DOM после обработки radio")
+        await asyncio.sleep(0.5)
+        if form_selector:
+            try:
+                form_el = await self.page.query(form_selector, timeout=3, raise_exc=False)
+                if form_el:
+                    fresh = await self.selector_finder.identify_fields(form_el)
+                    existing_names = {
+                        f.get("name") for f in selectors.get("custom_fields", [])
+                        if isinstance(f, dict) and f.get("name")
+                    }
+                    for new_f in fresh.get("custom_fields", []):
+                        if isinstance(new_f, dict) and new_f.get("name") not in existing_names:
+                            selectors["custom_fields"].append(new_f)
+                            logger.debug(f"Динамически добавлено поле: {new_f.get('name')} ({new_f.get('selector')})")
+            except Exception as e:
+                logger.warning(f"Не удалось выполнить синхронизацию DOM (Шаг 0.5): {e}")
+
 
         # Шаг 1: поля ввода
         logger.info("Шаг 1: заполнение полей ввода")
@@ -1374,8 +1506,13 @@ class RegistrationController:
             if not isinstance(custom_field, dict):
                 continue
             field_name = custom_field.get("name")
+            
+            # 🔥 ФИЛЬТР: пропускаем поля, уже заполненные на Шаге 0.2 (radio)
+            if field_name in filled_fields:
+                continue
+                
             sel = custom_field.get("selector")
-
+    
             if not field_name or not sel:
                 continue
 

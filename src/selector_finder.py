@@ -603,6 +603,22 @@ class SelectorFinder:
         }
         service_field_keywords: list[str] = [
             k.lower() for k in self.common_fields.get("service_field_keywords", [])
+            ]
+
+        # 📍 ОПРЕДЕЛЯЕМ known_field_types ЗДЕСЬ, до цикла for element in inputs
+        known_field_types = [
+            ("dob_day",   self.common_fields.get("dob_day_keywords", [])),
+            ("dob_month", self.common_fields.get("dob_month_keywords", [])),
+            ("dob_year",  self.common_fields.get("dob_year_keywords", [])),
+            ("city",      self.common_fields.get("city_keywords", [])),
+            ("birthdate", self.common_fields.get("birthdate_keywords", [])),
+            ("gender",    self.common_fields.get("gender_keywords", [])),
+            ("firstname", self.common_fields.get("firstname_keywords", [])),
+            ("lastname",  self.common_fields.get("lastname_keywords", [])),
+            ("phone",     self.common_fields.get("phone_keywords", [])),
+            ("website",   self.common_fields.get("website_keywords", [])),
+            ("country",   self.common_fields.get("country_keywords", [])),
+            ("timezone",  self.common_fields.get("timezone_keywords", [])),
         ]
 
         # Получаем все поля формы
@@ -825,8 +841,51 @@ class SelectorFinder:
                                 f"Найдено несколько radio регистрации — "
                                 f"пропускаем: {selector} | '{display_text}'"
                             )
-                    # Все radio (совпавшие и нет) не идут в custom_fields
-                    continue
+                        continue  # ✅ Прерываем ТОЛЬКО для register_radio
+    
+                    # Все остальные radio (gender, подписки и т.д.)
+                    radio_name = attrs.get("name") or attrs.get("id")
+                    if not radio_name:
+                        continue  # Пропускаем radio без имени/ID
+    
+                    group_selector = f"input[name='{radio_name}']"
+                    # Собираем опции через JS (безопасно, JSON.stringify)
+                    try:
+                        js_sel = json.dumps(group_selector)
+                        opts_js = f"""
+                            JSON.stringify(
+                                Array.from(document.querySelectorAll({js_sel})).map(r => ({{
+                                    value: r.value || '',
+                                    text: (r.labels?.length ? r.labels[0].innerText.trim() : ''),
+                                    checked: r.checked
+                                }}))
+                            );
+                        """
+                        resp = await self.page.execute_script(opts_js)
+                        raw_opts = resp.get("result", {}).get("result", {}).get("value", "[]")
+                        options = json.loads(raw_opts) if isinstance(raw_opts, str) else []
+                    except Exception as e:
+                        logger.debug(f"Не удалось собрать опции radio {group_selector}: {e}")
+                        options = []
+    
+                    # Защита от дубликатов в custom_fields
+                    if not any(
+                        f.get("name") == radio_name and f.get("type") == "radio"
+                        for f in result["custom_fields"]
+                    ):
+                        matched_type = next(
+                            (tn for tn, kw in known_field_types if any(k.lower() in combined for k in kw)),
+                            None
+                        )
+                        result["custom_fields"].append({
+                            "name": matched_type or radio_name,
+                            "selector": group_selector,
+                            "type": "radio",
+                            "options": options,
+                            "display_text": display_text,
+                        })
+                        logger.debug(f"Добавлена radio-группа: {matched_type or radio_name} ({group_selector})")
+                    continue  # ✅ Явно прерываем, не проваливаемся в email/username
 
                 # Email поля
                 if field_type == "email" or any(kw in combined for kw in email_keywords):
@@ -858,22 +917,6 @@ class SelectorFinder:
                             result["username_label"] = display_text
                         logger.debug(f"Определён username: {selector} | '{display_text}'")
                     continue
-
-                # Определяем тип по ключевым словам
-                known_field_types = [
-                    ("dob_day",   self.common_fields.get("dob_day_keywords", [])),
-                    ("dob_month", self.common_fields.get("dob_month_keywords", [])),
-                    ("dob_year",  self.common_fields.get("dob_year_keywords", [])),
-                    ("city",      self.common_fields.get("city_keywords", [])),
-                    ("birthdate", self.common_fields.get("birthdate_keywords", [])),
-                    ("gender",    self.common_fields.get("gender_keywords", [])),
-                    ("firstname", self.common_fields.get("firstname_keywords", [])),
-                    ("lastname",  self.common_fields.get("lastname_keywords", [])),
-                    ("phone",     self.common_fields.get("phone_keywords", [])),
-                    ("website",   self.common_fields.get("website_keywords", [])),
-                    ("country",   self.common_fields.get("country_keywords", [])),
-                    ("timezone",  self.common_fields.get("timezone_keywords", [])),
-                ]
 
                 matched_type = None
                 for type_name, keywords in known_field_types:
