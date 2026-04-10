@@ -641,7 +641,13 @@ class SelectorFinder:
             logger.warning(f"Ошибка получения кнопок формы: {e}")
             buttons = []
 
-        # Определяем кнопку submit
+        # Keyword-приоритет намеренно выше type="submit":
+        # кнопка регистрации может быть <button type="button"> с JS-обработчиком,
+        # поэтому текст надёжнее типа для определения нужной кнопки.
+        submit_by_keyword: tuple[str, str, dict[str, str]] | None = None
+        submit_by_text: tuple[str, str, dict[str, str]] | None = None
+        submit_fallback: tuple[str, str, dict[str, str]] | None = None
+
         for button in buttons:
             try:
                 attrs = self._get_element_attrs(button)
@@ -649,18 +655,35 @@ class SelectorFinder:
                 display_text = await self._get_display_text(button)
                 combined_btn = f"{display_text} {attrs.get('value', '')} {attrs.get('name', '')}".lower()
 
-                is_submit = (
-                    attrs.get("type") == "submit"
-                    or any(kw in combined_btn for kw in submit_keywords)
-                )
-                if is_submit and "submit_button" not in result:
-                    result["submit_button"] = selector
-                    result["submit_button_label"] = display_text
-                    # 🔧 Логирование tagName для отладки
-                    tag_name = attrs.get("tagName", "unknown")
-                    logger.debug(f"Кнопка submit найдена: {selector} | tag={tag_name} | '{display_text}'")
+                is_type_submit = attrs.get("type") == "submit"
+                has_keyword = any(kw in combined_btn for kw in submit_keywords)
+                has_text = bool(display_text.strip())
+
+                if has_keyword and submit_by_keyword is None:
+                    submit_by_keyword = (selector, display_text, attrs)
+                elif has_text and is_type_submit and submit_by_text is None:
+                    submit_by_text = (selector, display_text, attrs)
+                elif is_type_submit and submit_fallback is None:
+                    submit_fallback = (selector, display_text, attrs)
+
             except Exception as e:
                 logger.warning(f"Ошибка обработки кнопки: {e}")
+
+        chosen = submit_by_keyword or submit_by_text or submit_fallback
+        if chosen:
+            selector, display_text, attrs = chosen
+            chosen_by = (
+                "keyword" if chosen is submit_by_keyword
+                else "text" if chosen is submit_by_text
+                else "fallback"
+            )
+            result["submit_button"] = selector
+            result["submit_button_label"] = display_text
+            tag_name = attrs.get("tagName", "unknown")
+            logger.debug(
+                f"Кнопка submit найдена [{chosen_by}]: "
+                f"{selector} | tag={tag_name} | '{display_text}'"
+            )
 
         # Анализируем поля
         for element in inputs:

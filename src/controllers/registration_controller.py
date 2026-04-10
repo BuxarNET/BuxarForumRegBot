@@ -2557,7 +2557,7 @@ class RegistrationController:
         Единственный JS-вызов атомарно выполняет:
         - Фильтрацию невидимых кнопок через getComputedStyle
         - Поиск по тексту / value / label (приоритет)
-        - Fallback на первую видимую кнопку с надёжным селектором
+        - Fallback на первую видимую кнопку с надёжным селектором и непустым текстом
 
         Уровни надёжности селектора (по убыванию):
         1. #id               — абсолютно точный
@@ -2601,6 +2601,16 @@ class RegistrationController:
                         );
                     }}
 
+                    function getButtonText(btn) {{
+                        var text = (btn.innerText || btn.value || '').trim();
+                        // Ищем связанный label
+                        if (!text && btn.id) {{
+                            var lbl = document.querySelector('label[for="' + btn.id + '"]');
+                            if (lbl) text = (lbl.innerText || '').trim();
+                        }}
+                        return text;
+                    }}
+
                     function getSelector(btn) {{
                         // Уровень 1: id — абсолютно точный
                         if (btn.id) return '#' + btn.id;
@@ -2638,32 +2648,42 @@ class RegistrationController:
                         return null;
                     }}
 
-                    // Шаг 1: поиск по тексту/value/label среди видимых кнопок
+                    // Шаг 1: поиск по тексту/value/label среди видимых кнопок с непустым текстом
+                    var candidatesWithText = [];
                     for (var i = 0; i < buttons.length; i++) {{
                         var btn = buttons[i];
                         if (!isVisible(btn)) continue;
                         var sel = getSelector(btn);
                         if (!sel) continue;
 
-                        var text = (btn.innerText || btn.value || '').toLowerCase().trim();
-                        var label = '';
-                        if (btn.id) {{
-                            var lbl = document.querySelector('label[for="' + btn.id + '"]');
-                            if (lbl) label = (lbl.innerText || '').toLowerCase().trim();
-                        }}
-                        var combined = text + ' ' + label;
-                        if (keywords.some(function(kw) {{ return combined.includes(kw); }})) {{
-                            return {{selector: sel, found_by: 'text', display: text || label}};
+                        var text = getButtonText(btn).toLowerCase();
+                        // Игнорируем кнопки без текста на этом этапе
+                        if (!text) continue;
+
+                        candidatesWithText.push({{btn: btn, sel: sel, text: text}});
+                        if (keywords.some(function(kw) {{ return text.includes(kw); }})) {{
+                            return {{selector: sel, found_by: 'text', display: text}};
                         }}
                     }}
 
-                    // Шаг 2: fallback — первая видимая кнопка с надёжным селектором
+                    // Шаг 2: если есть хоть одна кнопка с текстом, но без ключевых слов — берём первую
+                    if (candidatesWithText.length > 0) {{
+                        var first = candidatesWithText[0];
+                        return {{
+                            selector: first.sel,
+                            found_by: 'text_fallback',
+                            display: first.text
+                        }};
+                    }}
+
+                    // Шаг 3: fallback — первая видимая кнопка с надёжным селектором
+                    // (даже если текст пустой, но только если других нет)
                     for (var i = 0; i < buttons.length; i++) {{
                         var btn = buttons[i];
                         if (!isVisible(btn)) continue;
                         var sel = getSelector(btn);
                         if (sel) {{
-                            var display = (btn.innerText || btn.value || '').trim();
+                            var display = getButtonText(btn);
                             return {{selector: sel, found_by: 'type', display: display}};
                         }}
                     }}
