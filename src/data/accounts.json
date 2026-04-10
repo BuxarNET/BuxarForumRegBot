@@ -17,7 +17,8 @@
       ],
       "gender": [
         "Мужской",
-        "Male"
+        "Male",
+        "1"
       ],
       "firstname": [
         "Виталий"
@@ -55,11 +56,14 @@
         "1"
       ],
       "pf_profile_fio": [],
-      "s": []
+      "s": [],
+      "qa_answer": [
+        "alex1966"
+      ]
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-04-07T19:31:10",
+    "last_attempt": "2026-04-08T02:54:03",
     "last_error": {
       "reason": "browser_crash",
       "proxy_used": null

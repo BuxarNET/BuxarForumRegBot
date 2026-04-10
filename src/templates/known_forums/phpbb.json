@@ -23,6 +23,9 @@
       "#register",
       [
         "#agreement"
+      ],
+      [
+        "#register"
       ]
     ]
   },
@@ -54,7 +57,8 @@
     ],
     "submit_button": [
       "input[type='submit'][name='submit']",
-      "#agreed"
+      "#agreed",
+      "#submit"
     ],
     "captcha_indicator": [],
     "lang": [
@@ -77,6 +81,12 @@
     ],
     "confirm_password_label": [
       "Подтвердите новый пароль:"
+    ],
+    "confirm_email": [
+      "#email_confirm"
+    ],
+    "confirm_email_label": [
+      "Подтвердите email:"
     ]
   },
   "custom_fields": [],

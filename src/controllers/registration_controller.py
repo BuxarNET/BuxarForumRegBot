@@ -1163,10 +1163,28 @@ class RegistrationController:
         if any(kw in current_url.lower() for kw in ["register", "signup", "регистр"]):
             logger.info("Уже на странице регистрации (проверка URL)")
             return True
-    
-        logger.warning("Страница регистрации не найдена")
-        return False
-          
+
+        logger.warning("Автоматический переход на страницу регистрации не удался — запрашиваем ручное открытие")
+        timeout = self.config.get("MANUAL_FIELD_FILL_TIMEOUT", 120)
+        print("\n" + "=" * 60)
+        print("⚠️  Не удалось автоматически перейти на страницу регистрации.")
+        print("Пожалуйста, откройте форму регистрации вручную в браузере")
+        print("(например, нажмите кнопку «Зарегистрироваться»)")
+        print("и нажмите Enter, чтобы продолжить.")
+        print(f"Ожидание: {timeout} секунд.")
+        print("=" * 60)
+        try:
+            await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(None, input, ">>> "),
+                timeout=timeout,
+            )
+            logger.info("Пользователь подтвердил открытие формы регистрации вручную")
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(f"Таймаут ожидания ручного открытия формы ({timeout}с)")
+            logger.warning("Страница регистрации не найдена")
+            return False
+        
     async def _fill_fields(
         self,
         selectors: dict,
