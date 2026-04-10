@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 
 import json
+from pydoll.exceptions import CommandExecutionTimeout
 import re
 from datetime import datetime
 from pathlib import Path
@@ -545,8 +546,15 @@ class RegistrationController:
         async def _exists_in_dom(sel: str) -> bool:
             """Проверяет наличие элемента в DOM текущей страницы."""
             if sel not in _dom_cache:
-                el = await self.page.query(sel, raise_exc=False, timeout=3)
-                _dom_cache[sel] = el is not None
+                try:
+                    el = await self.page.query(sel, raise_exc=False, timeout=3)
+                    _dom_cache[sel] = el is not None
+                except CommandExecutionTimeout:
+                    logger.debug(f"DOM-проверка: '{sel}' → таймаут Pydoll → отсутствующий")
+                    _dom_cache[sel] = False
+                except Exception as e:
+                    logger.warning(f"DOM-проверка: '{sel}' → неожиданная ошибка {type(e).__name__} → отсутствующий")
+                    _dom_cache[sel] = False
                 logger.debug(
                     f"DOM-проверка: '{sel}' → "
                     f"{'найден' if _dom_cache[sel] else 'отсутствует'}"
