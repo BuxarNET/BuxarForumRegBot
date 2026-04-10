@@ -1729,6 +1729,36 @@ class RegistrationController:
                             logger.info(f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик")
                         else:
                             await self.browser.human_click(agree_selector)
+                            await asyncio.sleep(0.3)
+                            still_unchecked = element.get_attribute("checked") is None
+                            if still_unchecked:
+                                logger.debug(
+                                    f"Чекбокс '{agree_selector}' не отмечен после клика — "
+                                    f"пробуем клик по родительскому label через JS"
+                                )
+                                sel_js = json.dumps(agree_selector)
+                                try:
+                                    await self.page.execute_script(f"""
+                                        (function() {{
+                                            var el = document.querySelector({sel_js});
+                                            if (el) {{
+                                                var label = el.closest('label');
+                                                if (label) {{ label.click(); return; }}
+                                            }}
+                                            if (el) {{ el.click(); }}
+                                        }})();
+                                    """)
+                                    await asyncio.sleep(0.3)
+                                    checked_after = element.get_attribute("checked") is not None
+                                    logger.debug(
+                                        f"Состояние чекбокса после fallback-клика: "
+                                        f"{'отмечен' if checked_after else 'не отмечен'}"
+                                    )
+                                except Exception as js_err:
+                                    logger.warning(
+                                        f"Ошибка fallback-клика по label для '{agree_selector}': "
+                                        f"{type(js_err).__name__}"
+                                    )
                             logger.info(f"Чекбокс согласия отмечен: {agree_selector}")
                         filled_fields.append("agree_checkbox")
                     # Сохранение через _save_block_to_template при успехе регистрации —
