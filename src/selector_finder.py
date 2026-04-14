@@ -92,15 +92,28 @@ class SelectorFinder:
             logger.warning(f"Ошибка получения атрибутов: {e}")
             return {"type": "", "name": "", "id": "", "placeholder": "", "value": "", "tagName": "input", "label": ""}
 
-    def _generate_css_selector(self, element, attrs: dict | None = None) -> str:
-        """Генерирует уникальный CSS-селектор для элемента (не async).
+    def _generate_css_selector(
+        self,
+        element,
+        attrs: dict | None = None,
+        form_element: object | None = None,
+    ) -> str:
+        """Генерирует уникальный CSS-селектор для элемента.
 
         Args:
             element: элемент Pydoll.
             attrs: уже вычисленные атрибуты элемента из _get_element_attrs.
-                   Если переданы — используются для определения tagName
-                   вместо повторного get_attribute (надёжнее для select без id).
+            form_element: родительская форма/блок для контекстной генерации
+                         (опционально, для неточных селекторов).
+
+        Returns:
+            CSS-селектор строкой. Для неточных селекторов (без id/name) добавляет
+            контекст родительского элемента.
         """
+        # Локальная функция экранирования для безопасности CSS-селекторов
+        def _escape_attr(value: str) -> str:
+            return value.replace("'", "\\'").replace('"', '\\"')
+
         try:
             el_id = element.get_attribute("id")
             if el_id:
@@ -112,13 +125,63 @@ class SelectorFinder:
                 tag = element.get_attribute("tagName") or ""
 
             if not tag:
+                el_action = element.get_attribute("action")
+                el_method = element.get_attribute("method")
                 el_type = (element.get_attribute("type") or "").lower()
                 el_value = element.get_attribute("value")
-                if el_type == "submit" and not el_value:
+                if el_action or el_method:
+                    tag = "form"
+                elif el_type == "submit" and not el_value:
                     tag = "button"
                 else:
                     tag = "input"
             tag = tag.lower()
+
+            # Уточняющий контекст родительского элемента для неточных селекторов
+            def _build_contextual_selector(base_selector: str) -> str:
+                """Добавляет контекст родительского элемента к неточному селектору."""
+                if not form_element:
+                    return base_selector
+
+                parent_tag = (form_element.get_attribute("tagName") or "form").lower()
+                form_attrs = {
+                    "id": form_element.get_attribute("id") or "",
+                    "action": form_element.get_attribute("action") or "",
+                    "name": form_element.get_attribute("name") or "",
+                    "method": form_element.get_attribute("method") or "",
+                }
+
+                # Приоритет: id → action → name → method → bare parent_tag
+                if form_attrs["id"]:
+                    return f"{parent_tag}#{form_attrs['id']} {base_selector}"
+                
+                action_clean = form_attrs["action"].strip()
+                # Исключаем бесполезные значения action и все javascript: схемы
+                if action_clean and action_clean not in ["", "#"] and not action_clean.lower().startswith("javascript:"):
+                    return f"{parent_tag}[action='{_escape_attr(action_clean)}'] {base_selector}"
+                
+                if form_attrs["name"]:
+                    return f"{parent_tag}[name='{_escape_attr(form_attrs['name'])}'] {base_selector}"
+                
+                if form_attrs["method"]:
+                    return f"{parent_tag}[method='{form_attrs['method']}'] {base_selector}"
+
+                # Fallback: хотя бы привязка к родительскому тегу
+                return f"{parent_tag} {base_selector}"
+
+            # Специальная обработка для <form> — сама форма не нуждается в контексте
+            if tag == "form":
+                action = element.get_attribute("action") or ""
+                form_name = element.get_attribute("name") or ""
+                form_method = (element.get_attribute("method") or "").lower()
+                
+                if action and action not in ["", "#"] and not action.lower().startswith("javascript:"):
+                    return f"form[action='{_escape_attr(action)}']"
+                if form_name:
+                    return f"form[name='{_escape_attr(form_name)}']"
+                if form_method:
+                    return f"form[method='{form_method}']"
+                return "form"
 
             name = element.get_attribute("name")
             if name:
@@ -126,8 +189,15 @@ class SelectorFinder:
 
             el_type = element.get_attribute("type")
             if el_type:
-                return f"{tag}[type='{el_type}']"
+                base = f"{tag}[type='{el_type}']"
+                # Для неточных селекторов (type без id/name) добавляем контекст родителя
+                if tag in ("button", "input") and form_element:
+                    return _build_contextual_selector(base)
+                return base
 
+            # Тег без атрибутов — добавляем контекст если возможно
+            if form_element:
+                return _build_contextual_selector(tag)
             return tag
 
         except Exception as e:
@@ -533,17 +603,34 @@ class SelectorFinder:
                 value = (element.get_attribute("value") or "").strip()
                 if value:
                     return value
-                # button innerText через JS
+
+                # Приоритет 1: JS напрямую на объекте элемента (this = нужная кнопка)
+                # Это основной и самый надёжный способ для модальных окон и сложных форм
+                try:
+                    response = await element.execute_script(
+                        'return this.innerText?.trim() || this.textContent?.trim() || ""',
+                        return_by_value=True,
+                    )
+                    text = response.get("result", {}).get("result", {}).get("value", "") or ""
+                    if text:
+                        logger.debug(f"Текст кнопки получен через element.execute_script: '{text}'")
+                        return text
+                except Exception as e:
+                    logger.debug(f"element.execute_script не сработал для кнопки: {e}")
+
+                # Приоритет 2: fallback через глобальный querySelector (последний резерв)
                 try:
                     btn_selector = f"#{el_id}" if el_id else self._generate_css_selector(element)
+                    js_sel = json.dumps(btn_selector)
                     response = await self.page.execute_script(
-                        f"return document.querySelector('{btn_selector}')?.innerText?.trim() || ''"
+                        f"return document.querySelector({js_sel})?.innerText?.trim() || ''"
                     )
-                    text = response.get("result", {}).get("result", {}).get("value", "")
+                    text = response.get("result", {}).get("result", {}).get("value", "") or ""
                     if text:
                         return text
                 except Exception as e:
-                    logger.debug(f"Не удалось получить innerText кнопки: {e}")
+                    logger.debug(f"Не удалось получить innerText кнопки через глобальный JS: {e}")
+
                 return ""
 
             # Для полей и чекбоксов — label[for="id"]
@@ -631,7 +718,7 @@ class SelectorFinder:
             logger.error(f"Ошибка получения полей формы: {e}")
             return result
 
-        # Получаем кнопки submit
+                # Получаем кнопки submit
         try:
             buttons = await form_element.query(
                 'button[type="submit"], input[type="submit"], button',
@@ -640,6 +727,8 @@ class SelectorFinder:
         except Exception as e:
             logger.warning(f"Ошибка получения кнопок формы: {e}")
             buttons = []
+
+        logger.debug(f"Найдено кнопок в форме: {len(buttons)}")
 
         # Keyword-приоритет намеренно выше type="submit":
         # кнопка регистрации может быть <button type="button"> с JS-обработчиком,
@@ -651,13 +740,27 @@ class SelectorFinder:
         for button in buttons:
             try:
                 attrs = self._get_element_attrs(button)
-                selector = self._generate_css_selector(button)
+                # ✅ ИЗМЕНЕНИЕ: передаём form_element для контекстной генерации селектора
+                selector = self._generate_css_selector(button, attrs, form_element)
                 display_text = await self._get_display_text(button)
                 combined_btn = f"{display_text} {attrs.get('value', '')} {attrs.get('name', '')}".lower()
 
-                is_type_submit = attrs.get("type") == "submit"
+                # ✅ ИЗМЕНЕНИЕ: <button> без явного type по умолчанию submit
+                el_type = attrs.get("type", "").lower()
+                el_tag = attrs.get("tagName", "").lower()
+                is_type_submit = (
+                    el_type == "submit" 
+                    or (el_tag == "button" and not el_type)
+                )
+                
                 has_keyword = any(kw in combined_btn for kw in submit_keywords)
                 has_text = bool(display_text.strip())
+
+                logger.debug(
+                    f"Кнопка: selector={selector} | tag={attrs.get('tagName', '?')} "
+                    f"| text='{display_text}' "
+                    f"| submit={is_type_submit} | keyword={has_keyword} | has_text={has_text}"
+                )
 
                 if has_keyword and submit_by_keyword is None:
                     submit_by_keyword = (selector, display_text, attrs)
@@ -683,6 +786,14 @@ class SelectorFinder:
             logger.debug(
                 f"Кнопка submit найдена [{chosen_by}]: "
                 f"{selector} | tag={tag_name} | '{display_text}'"
+            )
+        else:
+            logger.warning(
+                f"Кнопка submit не определена: "
+                f"кнопок в форме={len(buttons)}, "
+                f"keyword={'найдена' if submit_by_keyword else 'нет'}, "
+                f"text={'найдена' if submit_by_text else 'нет'}, "
+                f"fallback={'найден' if submit_fallback else 'нет'}"
             )
 
         # Анализируем поля
