@@ -243,15 +243,23 @@ class SelectorFinder:
         submit_kw = [k.lower() for k in self.common_fields.get("submit_keywords", [])]
         skip_field_kw = [k.lower() for k in self.common_fields.get("checkbox_skip_keywords", [])]
 
-        # Собираем селекторы из шаблона для бонусных очков
+        # Собираем селекторы и label кнопки из шаблона для бонусных очков
         template_selectors: set[str] = set()
+        template_submit_labels: set[str] = set()
         if template:
             fields = template.get("fields") or {}
-            for val in fields.values():
+            for key, val in fields.items():
+                if key == "submit_button_label":
+                    continue
                 if isinstance(val, list):
                     template_selectors.update(v for v in val if v)
                 elif val:
                     template_selectors.add(val)
+            submit_label_raw = fields.get("submit_button_label")
+            if isinstance(submit_label_raw, list):
+                template_submit_labels.update(v.lower() for v in submit_label_raw if v)
+            elif submit_label_raw:
+                template_submit_labels.add(submit_label_raw.lower())
             agree_step = template.get("agree_step") or {}
             for cb in agree_step.get("checkboxes") or []:
                 if cb:
@@ -260,7 +268,10 @@ class SelectorFinder:
                 if btn:
                     template_selectors.add(btn)
 
-        logger.debug(f"Шаблонных селекторов для бонуса: {len(template_selectors)}")
+        logger.debug(
+            f"Шаблонных селекторов для бонуса: {len(template_selectors)}, "
+            f"submit labels: {template_submit_labels or '—'}"
+        )
 
         # --- Шаг 1: собираем все <form> ---
         candidates: list[dict] = []
@@ -519,10 +530,17 @@ class SelectorFinder:
                             f"{name or cb_id}(agree_kw+3,src={match_source})"
                         )
 
-                # Очки за кнопки по тексту
+                # Очки за кнопки по тексту и совпадению label из шаблона
                 for btn in visible_buttons:
                     btn_display = await self._get_display_text(btn)
                     btn_text = btn_display.lower()
+                    if template_submit_labels and any(
+                        lbl in btn_text or btn_text in lbl
+                        for lbl in template_submit_labels
+                        if lbl
+                    ):
+                        score += 10
+                        score_details.append(f"'{btn_text[:20]}'(submit_label+10)")
                     if any(kw in btn_text for kw in submit_kw):
                         score += 2
                         score_details.append(f"'{btn_text[:20]}'(submit_kw+2)")
@@ -656,13 +674,25 @@ class SelectorFinder:
             logger.debug(f"Ошибка получения display_text: {e}")
             return ""
 
-    async def identify_fields(self, form_element) -> dict:
+    async def identify_fields(
+        self,
+        form_element,
+        form_selector: str = "",
+        template_submit_label: str = "",
+    ) -> dict:
         """Анализирует поля внутри формы и классифицирует их.
 
         Определяет типы полей по атрибутам name/id/placeholder/type/display_text
         используя ключевые слова из common_fields.json.
         Для каждого поля читает display_text (label или value).
         Неизвестные поля добавляются в custom_fields.
+
+        Args:
+            form_element: Объект формы Pydoll для поиска полей внутри неё.
+            form_selector: CSS-селектор формы — используется для построения
+                контекстного селектора кнопки если кнопка неуникальна в DOM.
+            template_submit_label: Текст кнопки submit из шаблона —
+                используется как приоритетный критерий выбора кнопки.
 
         Returns:
             Словарь с найденными селекторами и display_text полей.
@@ -730,39 +760,52 @@ class SelectorFinder:
 
         logger.debug(f"Найдено кнопок в форме: {len(buttons)}")
 
-        # Keyword-приоритет намеренно выше type="submit":
-        # кнопка регистрации может быть <button type="button"> с JS-обработчиком,
-        # поэтому текст надёжнее типа для определения нужной кнопки.
+        # Приоритеты выбора кнопки submit (от высшего к низшему):
+        # 1. template_label — точное совпадение текста с шаблоном
+        # 2. keyword        — текст совпадает с submit_keywords
+        # 3. text           — непустой текст + type=submit
+        # 4. fallback       — любой type=submit
+        submit_by_template: tuple[str, str, dict[str, str]] | None = None
         submit_by_keyword: tuple[str, str, dict[str, str]] | None = None
         submit_by_text: tuple[str, str, dict[str, str]] | None = None
         submit_fallback: tuple[str, str, dict[str, str]] | None = None
 
+        tmpl_label_lower = template_submit_label.lower().strip() if template_submit_label else ""
+
         for button in buttons:
             try:
                 attrs = self._get_element_attrs(button)
-                # ✅ ИЗМЕНЕНИЕ: передаём form_element для контекстной генерации селектора
                 selector = self._generate_css_selector(button, attrs, form_element)
                 display_text = await self._get_display_text(button)
                 combined_btn = f"{display_text} {attrs.get('value', '')} {attrs.get('name', '')}".lower()
 
-                # ✅ ИЗМЕНЕНИЕ: <button> без явного type по умолчанию submit
                 el_type = attrs.get("type", "").lower()
                 el_tag = attrs.get("tagName", "").lower()
                 is_type_submit = (
-                    el_type == "submit" 
+                    el_type == "submit"
                     or (el_tag == "button" and not el_type)
                 )
-                
+
                 has_keyword = any(kw in combined_btn for kw in submit_keywords)
                 has_text = bool(display_text.strip())
+                has_template_label = bool(
+                    tmpl_label_lower
+                    and display_text.strip()
+                    and (
+                        tmpl_label_lower in display_text.lower()
+                        or display_text.lower() in tmpl_label_lower
+                    )
+                )
 
                 logger.debug(
                     f"Кнопка: selector={selector} | tag={attrs.get('tagName', '?')} "
-                    f"| text='{display_text}' "
-                    f"| submit={is_type_submit} | keyword={has_keyword} | has_text={has_text}"
+                    f"| text='{display_text}' | submit={is_type_submit} "
+                    f"| keyword={has_keyword} | template_label={has_template_label}"
                 )
 
-                if has_keyword and submit_by_keyword is None:
+                if has_template_label and submit_by_template is None:
+                    submit_by_template = (selector, display_text, attrs)
+                elif has_keyword and submit_by_keyword is None:
                     submit_by_keyword = (selector, display_text, attrs)
                 elif has_text and is_type_submit and submit_by_text is None:
                     submit_by_text = (selector, display_text, attrs)
@@ -772,14 +815,37 @@ class SelectorFinder:
             except Exception as e:
                 logger.warning(f"Ошибка обработки кнопки: {e}")
 
-        chosen = submit_by_keyword or submit_by_text or submit_fallback
+        chosen = submit_by_template or submit_by_keyword or submit_by_text or submit_fallback
         if chosen:
             selector, display_text, attrs = chosen
             chosen_by = (
-                "keyword" if chosen is submit_by_keyword
+                "template_label" if chosen is submit_by_template
+                else "keyword" if chosen is submit_by_keyword
                 else "text" if chosen is submit_by_text
                 else "fallback"
             )
+
+            # Проверка уникальности и уточнение через form_selector
+            # Только для простых селекторов (без пробелов — не контекстных)
+            if form_selector and " " not in selector:
+                try:
+                    sel_js = json.dumps(selector)
+                    count_resp = await self.page.execute_script(
+                        f"return document.querySelectorAll({sel_js}).length"
+                    )
+                    count = (
+                        count_resp.get("result", {}).get("result", {}).get("value", 1)
+                        if isinstance(count_resp, dict) else 1
+                    )
+                    if count > 1:
+                        selector = f"{form_selector} {selector}"
+                        logger.debug(
+                            f"Селектор кнопки уточнён контекстом формы "
+                            f"(найдено {count} в DOM): {selector}"
+                        )
+                except Exception as e:
+                    logger.debug(f"Не удалось проверить уникальность кнопки: {e}")
+
             result["submit_button"] = selector
             result["submit_button_label"] = display_text
             tag_name = attrs.get("tagName", "unknown")
@@ -791,6 +857,7 @@ class SelectorFinder:
             logger.warning(
                 f"Кнопка submit не определена: "
                 f"кнопок в форме={len(buttons)}, "
+                f"template_label={'найдена' if submit_by_template else 'нет'}, "
                 f"keyword={'найдена' if submit_by_keyword else 'нет'}, "
                 f"text={'найдена' if submit_by_text else 'нет'}, "
                 f"fallback={'найден' if submit_fallback else 'нет'}"
@@ -944,10 +1011,15 @@ class SelectorFinder:
                         continue
                     if any(kw in combined for kw in agree_keywords):
                         if "agree_checkbox" not in result:
-                            result["agree_checkbox"] = selector
-                            if display_text:
+                            result["agree_checkbox"] = []
+                        if selector not in result["agree_checkbox"]:
+                            result["agree_checkbox"].append(selector)
+                            if display_text and "agree_checkbox_label" not in result:
                                 result["agree_checkbox_label"] = display_text
-                            logger.debug(f"Определён agree_checkbox: {selector} | '{display_text}'")
+                            logger.debug(
+                                f"Добавлен agree_checkbox [{len(result['agree_checkbox'])}]: "
+                                f"{selector} | '{display_text}'"
+                            )
                         continue
                     # Неизвестный чекбокс — в custom_fields
                     result["custom_fields"].append({
@@ -1265,7 +1337,21 @@ class SelectorFinder:
 
         for block in blocks:
             try:
-                fields = await self.identify_fields(block["form_element"])
+                tmpl_submit_label = ""
+                if template:
+                    tmpl_submit_label_raw = (
+                        (template.get("fields") or {}).get("submit_button_label")
+                    )
+                    if isinstance(tmpl_submit_label_raw, list) and tmpl_submit_label_raw:
+                        tmpl_submit_label = tmpl_submit_label_raw[0]
+                    elif isinstance(tmpl_submit_label_raw, str):
+                        tmpl_submit_label = tmpl_submit_label_raw
+
+                fields = await self.identify_fields(
+                    block["form_element"],
+                    form_selector=block["form_selector"],
+                    template_submit_label=tmpl_submit_label,
+                )
                 result.append({
                     "form_selector": block["form_selector"],
                     "score": block["score"],

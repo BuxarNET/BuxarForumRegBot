@@ -572,6 +572,38 @@ class RegistrationController:
             # Пустой список в шаблоне — некорректные данные, логируем
             if isinstance(tmpl_sel_raw, list) and not tmpl_sel_raw:
                 logger.debug(f"Шаблон для '{key}' содержит пустой список селекторов")
+            
+            # ── Отдельная обработка agree_checkbox (список селекторов) ──────────
+            if key == "agree_checkbox":
+                block_list: list[str] = (
+                    block_val if isinstance(block_val, list)
+                    else ([block_val] if block_val else [])
+                )
+                tmpl_list: list[str] = (
+                    tmpl_sel_raw if isinstance(tmpl_sel_raw, list)
+                    else ([tmpl_sel_raw] if tmpl_sel_raw else [])
+                )
+                if not block_list:
+                    if tmpl_list and await _exists_in_dom(tmpl_list[0]):
+                        selectors[key] = tmpl_list
+                        selectors[f"{key}_label"] = block_label
+                        selectors[f"{key}_source"] = "template"
+                        logger.debug(
+                            f"Поле 'agree_checkbox' — из шаблона (DOM) → source=template"
+                        )
+                    else:
+                        logger.debug("Поле 'agree_checkbox' — не найдено → пропускаем")
+                    continue
+                all_in_tmpl = set(block_list).issubset(set(tmpl_list))
+                source = "template" if all_in_tmpl else "manual"
+                selectors[key] = block_list
+                selectors[f"{key}_label"] = block_label
+                selectors[f"{key}_source"] = source
+                logger.debug(
+                    f"Поле 'agree_checkbox' — {len(block_list)} чекбокс(ов) "
+                    f"{block_list} → source={source}"
+                )
+                continue
 
             tmpl_sel = (
                 tmpl_sel_raw[0]
@@ -673,6 +705,9 @@ class RegistrationController:
             # captcha_indicator может быть CaptchaInfo (dict) — берём selector
             if isinstance(sel, dict):
                 sel = sel.get("selector") or ""
+            # agree_checkbox — список: сериализуем для hashable-кортежа в frozenset
+            elif isinstance(sel, list):
+                sel = " | ".join(sorted(sel)) if sel else ""
             if not sel:
                 continue
             label = selectors.get(f"{field_name}_label", "") or ""
@@ -865,7 +900,31 @@ class RegistrationController:
                     existing if isinstance(existing, list)
                     else ([existing] if existing else [])
                 )
-                if len(existing_list) >= self.MAX_SELECTORS_PER_FIELD:
+                # agree_checkbox — список: накапливаем новые, передаём полный список
+                if key == "agree_checkbox" and isinstance(selector, list):
+                    new_sels = [
+                        sel for sel in selector
+                        if sel not in existing_list
+                        and len(existing_list) < self.MAX_SELECTORS_PER_FIELD
+                    ]
+                    if len(existing_list) >= self.MAX_SELECTORS_PER_FIELD and selector:
+                        logger.warning(
+                            f"Превышен лимит селекторов для '{key}' "
+                            f"({len(existing_list)}/{self.MAX_SELECTORS_PER_FIELD}) "
+                            f"— новые не сохранены"
+                        )
+                    elif new_sels:
+                        existing_list.extend(new_sels)
+                        template_fields[key] = existing_list
+                        fields_to_save[key] = existing_list
+                        logger.info(
+                            f"Добавлено {len(new_sels)} новых agree-чекбоксов "
+                            f"[{source}]: {new_sels}"
+                        )
+                    else:
+                        logger.debug("Все agree-чекбоксы уже в шаблоне → пропускаем")
+                    continue
+                elif len(existing_list) >= self.MAX_SELECTORS_PER_FIELD:
                     logger.warning(
                         f"Превышен лимит селекторов для '{key}' "
                         f"({len(existing_list)}/{self.MAX_SELECTORS_PER_FIELD}) "
@@ -958,7 +1017,21 @@ class RegistrationController:
                 logger.debug(
                     f"submit_button '{found_submit_clean}' уже в шаблоне → пропускаем"
                 )
+        # ── Блок Г.1: submit_button_label ────────────────────────────────────
 
+        submit_label = selectors.get("submit_button_label", "")
+        if submit_label:
+            existing_label = template_fields.get("submit_button_label")
+            existing_label_list = (
+                existing_label if isinstance(existing_label, list)
+                else ([existing_label] if existing_label else [])
+            )
+            if submit_label not in existing_label_list:
+                fields_to_save["submit_button_label"] = submit_label
+                logger.info(f"Новый label для submit_button: «{submit_label}»")
+            else:
+                logger.debug("Label для submit_button уже в шаблоне → пропускаем")
+                
         # ── Блок Д: form_selector ─────────────────────────────────────────────
 
         new_form_selector: str | None = None
@@ -1032,17 +1105,13 @@ class RegistrationController:
                 if isinstance(existing, str):
                     existing = [existing]
                     template["fields"][key] = existing
-                if val not in existing:
+                # val может быть списком (agree_checkbox) — разворачиваем поэлементно
+                if isinstance(val, list):
+                    for v in val:
+                        if v and v not in existing:
+                            existing.append(v)
+                elif val not in existing:
                     existing.append(val)
-
-        if checkboxes_to_save:
-            existing = (
-                template.setdefault("agree_step", {})
-                        .setdefault("checkboxes", [])
-            )
-            for sel in checkboxes_to_save:
-                if sel not in existing:
-                    existing.append(sel)
 
         if found_submit_clean:
             existing_sub = (
@@ -1054,6 +1123,18 @@ class RegistrationController:
                 template["fields"]["submit_button"] = existing_sub
             if found_submit_clean not in existing_sub:
                 existing_sub.append(found_submit_clean)
+
+        submit_label = selectors.get("submit_button_label", "")
+        if submit_label:
+            existing_label = (
+                template.setdefault("fields", {})
+                        .setdefault("submit_button_label", [])
+            )
+            if isinstance(existing_label, str):
+                existing_label = [existing_label]
+                template["fields"]["submit_button_label"] = existing_label
+            if submit_label not in existing_label:
+                existing_label.append(submit_label)
 
         if new_form_selector:
             existing_fs = (
@@ -1701,74 +1782,85 @@ class RegistrationController:
                     if not is_one_time:
                         account_data.setdefault("custom_fields", {})[field_name] = []
 
-        # Шаг 2: чекбокс согласия из блока
+        # Шаг 2: чекбокс(ы) согласия из блока
         logger.info("Шаг 2: обработка чекбокса согласия")
-        agree_selector = selectors.get("agree_checkbox")
-        if agree_selector:
-            try:
-                element = await self.page.query(agree_selector, timeout=3, raise_exc=False)
-                if element is None:
-                    logger.warning(f"Чекбокс согласия '{agree_selector}' не найден в DOM — пропускаем")
-                    skipped_fields.append("agree_checkbox")
-                else:
-                    # Проверяем что элемент является полем ввода а не кнопкой
-                    _input_types = {
-                        "checkbox", "radio", "text", "email", "password",
-                        "number", "tel", "url", "date", "time", "file",
-                        "range", "color", "search"
-                    }
+        agree_raw = selectors.get("agree_checkbox")
+        agree_selectors: list[str] = (
+            agree_raw if isinstance(agree_raw, list)
+            else ([agree_raw] if agree_raw else [])
+        )
+        if agree_selectors:
+            _agree_filled = False
+            _input_types = {
+                "checkbox", "radio", "text", "email", "password",
+                "number", "tel", "url", "date", "time", "file",
+                "range", "color", "search"
+            }
+            for agree_selector in agree_selectors:
+                try:
+                    element = await self.page.query(agree_selector, timeout=3, raise_exc=False)
+                    if element is None:
+                        logger.warning(
+                            f"Чекбокс согласия '{agree_selector}' не найден в DOM — пропускаем"
+                        )
+                        continue
                     el_type = (element.get_attribute("type") or "text").lower()
                     if el_type not in _input_types:
                         logger.debug(
                             f"Элемент agree_checkbox имеет type='{el_type}' — "
-                            f"это кнопка, пропускаем шаг 2"
+                            f"это кнопка, пропускаем"
+                        )
+                        continue
+                    already_checked = element.get_attribute("checked") is not None
+                    if already_checked:
+                        logger.info(
+                            f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик"
                         )
                     else:
-                        already_checked = element.get_attribute("checked") is not None
-                        if already_checked:
-                            logger.info(f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик")
-                        else:
-                            await self.browser.human_click(agree_selector)
-                            await asyncio.sleep(0.3)
-                            still_unchecked = element.get_attribute("checked") is None
-                            if still_unchecked:
+                        await self.browser.human_click(agree_selector)
+                        await asyncio.sleep(0.3)
+                        still_unchecked = element.get_attribute("checked") is None
+                        if still_unchecked:
+                            logger.debug(
+                                f"Чекбокс '{agree_selector}' не отмечен после клика — "
+                                f"пробуем клик по родительскому label через JS"
+                            )
+                            sel_js = json.dumps(agree_selector)
+                            try:
+                                await self.page.execute_script(f"""
+                                    (function() {{
+                                        var el = document.querySelector({sel_js});
+                                        if (el) {{
+                                            var label = el.closest('label');
+                                            if (label) {{ label.click(); return; }}
+                                        }}
+                                        if (el) {{ el.click(); }}
+                                    }})();
+                                """)
+                                await asyncio.sleep(0.3)
+                                checked_after = element.get_attribute("checked") is not None
                                 logger.debug(
-                                    f"Чекбокс '{agree_selector}' не отмечен после клика — "
-                                    f"пробуем клик по родительскому label через JS"
+                                    f"Состояние чекбокса после fallback-клика: "
+                                    f"{'отмечен' if checked_after else 'не отмечен'}"
                                 )
-                                sel_js = json.dumps(agree_selector)
-                                try:
-                                    await self.page.execute_script(f"""
-                                        (function() {{
-                                            var el = document.querySelector({sel_js});
-                                            if (el) {{
-                                                var label = el.closest('label');
-                                                if (label) {{ label.click(); return; }}
-                                            }}
-                                            if (el) {{ el.click(); }}
-                                        }})();
-                                    """)
-                                    await asyncio.sleep(0.3)
-                                    checked_after = element.get_attribute("checked") is not None
-                                    logger.debug(
-                                        f"Состояние чекбокса после fallback-клика: "
-                                        f"{'отмечен' if checked_after else 'не отмечен'}"
-                                    )
-                                except Exception as js_err:
-                                    logger.warning(
-                                        f"Ошибка fallback-клика по label для '{agree_selector}': "
-                                        f"{type(js_err).__name__}"
-                                    )
-                            logger.info(f"Чекбокс согласия отмечен: {agree_selector}")
-                        filled_fields.append("agree_checkbox")
-                    # Сохранение через _save_block_to_template при успехе регистрации —
-                    # agree_checkbox в STANDARD_KEYS, source проверяется автоматически
-            except Exception as e:
-                logger.warning(f"Не удалось обработать чекбокс согласия ({agree_selector}): {e}")
+                            except Exception as js_err:
+                                logger.warning(
+                                    f"Ошибка fallback-клика по label для '{agree_selector}': "
+                                    f"{type(js_err).__name__}"
+                                )
+                        logger.info(f"Чекбокс согласия отмечен: {agree_selector}")
+                    _agree_filled = True
+                except Exception as e:
+                    logger.warning(
+                        f"Не удалось обработать чекбокс согласия ({agree_selector}): {e}"
+                    )
+            if _agree_filled:
+                filled_fields.append("agree_checkbox")
+            elif "agree_checkbox" not in skipped_fields:
                 skipped_fields.append("agree_checkbox")
         else:
             logger.debug("Чекбокс согласия в блоке не найден — пропускаем")
-
+            
         # Шаг 3: капча
         logger.info("Шаг 3: обработка капчи")
         captcha_ok = await self._handle_captcha(selectors)

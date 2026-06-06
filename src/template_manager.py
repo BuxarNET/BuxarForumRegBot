@@ -616,19 +616,29 @@ class TemplateManager:
                     if not new_selector:
                         continue
                     existing = target_fields.get(field_name)
+                    # new_selector может быть списком (например, agree_checkbox)
+                    new_items: list = (
+                        new_selector if isinstance(new_selector, list)
+                        else [new_selector]
+                    )
+                    new_items = [i for i in new_items if i]
+                    if not new_items:
+                        continue
                     if existing is None:
                         # Поля не было — создаём список
-                        target_fields[field_name] = [new_selector]
+                        target_fields[field_name] = list(new_items)
                     elif isinstance(existing, list):
-                        # Добавляем если нет в списке
-                        if new_selector not in existing:
-                            existing.append(new_selector)
+                        # Добавляем уникальные элементы
+                        for item in new_items:
+                            if item not in existing:
+                                existing.append(item)
                     elif isinstance(existing, str):
-                        # Конвертируем строку в список
-                        if existing != new_selector:
-                            target_fields[field_name] = [existing, new_selector]
-                        else:
-                            target_fields[field_name] = [existing]
+                        # Конвертируем строку в список и дополняем
+                        merged = [existing]
+                        for item in new_items:
+                            if item not in merged:
+                                merged.append(item)
+                        target_fields[field_name] = merged
                 target["fields"] = target_fields
 
             elif key in ("success_indicators", "error_indicators", "custom_fields"):
