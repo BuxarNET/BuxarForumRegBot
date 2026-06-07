@@ -839,7 +839,7 @@ class RegistrationController:
 
         # ── Шаг 0: единая фильтрация (ОДИН РАЗ до всех блоков) ──────────────
 
-        def _check_source(src: str | None, sel: str, field: str) -> bool:
+        def _check_source(src: str | None, sel: str | list, field: str) -> bool:
             """Возвращает True если селектор прошёл фильтр и может быть сохранён."""
             if src in (None, "", "unknown"):
                 logger.error(
@@ -848,18 +848,29 @@ class RegistrationController:
                 )
                 return False
             if src == "template":
-                logger.debug(
-                    f"Поле '{field}': source=template → пропускаем"
-                )
+                logger.debug(f"Поле '{field}': source=template → пропускаем")
                 return False
-            if self._is_dynamic_selector(sel):
+            
+            # Поддержка списка селекторов (agree_checkbox)
+            if isinstance(sel, list):
+                for s in sel:
+                    if s and self._is_dynamic_selector(s):
+                        logger.debug(
+                            f"Отсечён динамический селектор '{field}': {s} "
+                            f"[source={src}]"
+                        )
+                        return False
+                return True
+    
+            # Обычный случай — одиночный селектор (строка)
+            if sel and self._is_dynamic_selector(sel):
                 logger.debug(
                     f"Отсечён динамический селектор '{field}': {sel} "
                     f"[source={src}]"
                 )
                 return False
             return True
-
+    
         filled_fields_clean: list[str] = [
             f for f in filled_fields
             if _check_source(
@@ -900,7 +911,7 @@ class RegistrationController:
                     existing if isinstance(existing, list)
                     else ([existing] if existing else [])
                 )
-                # agree_checkbox — список: накапливаем новые, передаём полный список
+                # agree_checkbox — список: накапливаем новые, передаём только дельту
                 if key == "agree_checkbox" and isinstance(selector, list):
                     new_sels = [
                         sel for sel in selector
@@ -916,7 +927,7 @@ class RegistrationController:
                     elif new_sels:
                         existing_list.extend(new_sels)
                         template_fields[key] = existing_list
-                        fields_to_save[key] = existing_list
+                        fields_to_save[key] = new_sels
                         logger.info(
                             f"Добавлено {len(new_sels)} новых agree-чекбоксов "
                             f"[{source}]: {new_sels}"
@@ -1338,7 +1349,22 @@ class RegistrationController:
             "dob_month": account_data.get("dob_month"),
             "dob_year":  account_data.get("dob_year"),
         }
-
+        
+        # Кэшируем элемент формы для контекстного поиска во всех шагах
+        _form_el = None
+        if form_selector:
+            try:
+                _form_el = await self.page.query(form_selector, timeout=3, raise_exc=False)
+                if _form_el:
+                    logger.debug(f"Форма получена для контекстного поиска: {form_selector}")
+                else:
+                    logger.warning(
+                        f"Форма не найдена по селектору: {form_selector} "
+                        f"— будет использован глобальный поиск"
+                    )
+            except Exception as e:
+                logger.warning(f"Ошибка получения формы для контекста: {e}")
+                
         # Шаг 0: radio-кнопка регистрации
         # Должен выполняться до заполнения полей — на XenForo выбор radio
         # меняет доступность полей формы (username/email/password становятся активными)
@@ -1571,7 +1597,7 @@ class RegistrationController:
             not_visible_count: int = 0
 
             for sel in selectors_list:
-                raw = await self._try_fill_element(sel, value, field_name)
+                raw = await self._try_fill_element(sel, value, field_name, form_el=_form_el)
                 fill_status, sel_options = self._unpack_fill_result(raw)
                 if sel_options:
                     last_select_options = sel_options
@@ -1619,7 +1645,7 @@ class RegistrationController:
                 )
                 if manual_value:
                     for sel in selectors_list:
-                        raw = await self._try_fill_element(sel, manual_value, field_name)
+                        raw = await self._try_fill_element(sel, manual_value, field_name, form_el=_form_el)
                         fill_status, _ = self._unpack_fill_result(raw)
                         if fill_status in ("filled", "already_filled"):
                             used_selector = sel
@@ -1661,7 +1687,7 @@ class RegistrationController:
             # ── чекбокс — клик без текстового ввода ──
             if custom_field.get("type") == "checkbox":
                 try:
-                    element = await self.page.query(sel, timeout=3, raise_exc=False)
+                    element = await self._query_in_context(sel, form_el=_form_el)
                     if element is None:
                         logger.debug(f"Чекбокс '{field_name}' не найден в DOM — пропускаем")
                         skipped_fields.append(field_name)
@@ -1702,7 +1728,7 @@ class RegistrationController:
 
                 for v in values_to_try:
                     logger.debug(f"Пробуем вариант '{v}' для '{field_name}' из профиля")
-                    raw = await self._try_fill_element(sel, v, field_name)
+                    raw = await self._try_fill_element(sel, v, field_name, form_el=_form_el)
                     fs, sel_opts = self._unpack_fill_result(raw)
                     if sel_opts:
                         select_options.extend(
@@ -1728,7 +1754,7 @@ class RegistrationController:
                         options=select_options if select_options else None,
                     )
                     if manual_value:
-                        raw2 = await self._try_fill_element(sel, manual_value, field_name)
+                        raw2 = await self._try_fill_element(sel, manual_value, field_name, form_el=_form_el)
                         fill_status2, _ = self._unpack_fill_result(raw2)
                         if fill_status2 == "filled":
                             filled_fields.append(field_name)
@@ -1747,7 +1773,7 @@ class RegistrationController:
 
                 if auto_value and not is_one_time:
                     logger.debug(f"Автоопределение '{field_name}' = '{auto_value}'")
-                    raw = await self._try_fill_element(sel, auto_value, field_name)
+                    raw = await self._try_fill_element(sel, auto_value, field_name, form_el=_form_el)
                     fs, _ = self._unpack_fill_result(raw)
                     if fs == "filled":
                         filled_fields.append(field_name)
@@ -1768,7 +1794,7 @@ class RegistrationController:
                     display_text=custom_field.get("display_text", ""),
                 )
                 if manual_value:
-                    result = await self._try_fill_element(sel, manual_value, field_name)
+                    result = await self._try_fill_element(sel, manual_value, field_name, form_el=_form_el)
                     if result == "filled":
                         filled_fields.append(field_name)
                         filled_from_outside.append(field_name)  # п.4
@@ -1798,7 +1824,7 @@ class RegistrationController:
             }
             for agree_selector in agree_selectors:
                 try:
-                    element = await self.page.query(agree_selector, timeout=3, raise_exc=False)
+                    element = await self._query_in_context(agree_selector, form_el=_form_el)
                     if element is None:
                         logger.warning(
                             f"Чекбокс согласия '{agree_selector}' не найден в DOM — пропускаем"
@@ -1817,7 +1843,7 @@ class RegistrationController:
                             f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик"
                         )
                     else:
-                        await self.browser.human_click(agree_selector)
+                        await self.browser.human_click(element)
                         await asyncio.sleep(0.3)
                         still_unchecked = element.get_attribute("checked") is None
                         if still_unchecked:
@@ -1825,7 +1851,12 @@ class RegistrationController:
                                 f"Чекбокс '{agree_selector}' не отмечен после клика — "
                                 f"пробуем клик по родительскому label через JS"
                             )
-                            sel_js = json.dumps(agree_selector)
+                            js_agree_selector = (
+                                f"{form_selector} {agree_selector}"
+                                if form_selector and " " not in agree_selector
+                                else agree_selector
+                            )
+                            sel_js = json.dumps(js_agree_selector)
                             try:
                                 await self.page.execute_script(f"""
                                     (function() {{
@@ -1923,9 +1954,45 @@ class RegistrationController:
         if isinstance(result, tuple):
             return result
         return result, []
+    
+    async def _query_in_context(
+        self,
+        selector: str,
+        form_el=None,
+        timeout: float = 3.0,
+    ):
+        """Ищет элемент сначала внутри формы, затем глобально (fallback).
 
+        Args:
+            selector: CSS-селектор элемента.
+            form_el: Объект формы Pydoll — если передан, поиск выполняется внутри него.
+            timeout: Таймаут глобального поиска в секундах.
+
+        Returns:
+            Найденный элемент или None.
+        """
+        if form_el is not None:
+            try:
+                element = await form_el.query(selector, timeout=2, raise_exc=False)
+                if element:
+                    logger.debug(f"Элемент найден внутри формы: {selector}")
+                    return element
+            except Exception as e:
+                logger.debug(
+                    f"Контекстный поиск не сработал для '{selector}' "
+                    f"(возможно, форма устарела): {e}"
+                )
+        element = await self.page.query(selector, timeout=timeout, raise_exc=False)
+        if element and form_el is not None:
+            logger.debug(f"Элемент найден глобально (fallback): {selector}")
+        return element
+    
     async def _try_fill_element(
-        self, selector: str, value: str, field_name: str
+        self,
+        selector: str,
+        value: str,
+        field_name: str,
+        form_el=None,
     ) -> str | tuple[str, list[str]]:
         """Пробует заполнить элемент формы по селектору.
 
@@ -1946,7 +2013,7 @@ class RegistrationController:
             ("not_found", options) — select: значение не найдено в списке опций.
         """
         try:
-            element = await self.page.query(selector, timeout=3, raise_exc=False)
+            element = await self._query_in_context(selector, form_el=form_el)
             if not element:
                 logger.debug(f"Элемент не найден: {selector}")
                 return "not_found"
@@ -1958,11 +2025,12 @@ class RegistrationController:
             # Уточняем tagName через JS если не определён — для select без id
             if not tag or tag == "input":
                 try:
-                    sel_js_tag = json.dumps(selector)
-                    tag_response = await self.page.execute_script(
-                        f"return document.querySelector({sel_js_tag})"
-                        f"?.tagName?.toLowerCase() || null"
+                    # ✅ Эталонный вызов: используем element.execute_script + return_by_value=True
+                    tag_response = await element.execute_script(
+                        "return this.tagName?.toLowerCase() || null",
+                        return_by_value=True,
                     )
+                    # ✅ ПРАВИЛЬНЫЙ ПУТЬ ПАРСИНГА: двойной result (как в selector_finder.py)
                     tag_from_js = (
                         tag_response.get("result", {}).get("result", {}).get("value") or ""
                     )
@@ -1976,40 +2044,40 @@ class RegistrationController:
             # покрывает все способы скрытия: disabled, aria-disabled,
             # display:none, visibility:hidden, opacity:0, pointer-events:none,
             # скрытие через родителя или CSS-класс (getComputedStyle)
-            sel_js = json.dumps(selector)
+#            sel_js = json.dumps(selector)
             try:
-                vis_response = await self.page.execute_script(f"""
-                    (function() {{
-                        var el = document.querySelector({sel_js});
-                        if (!el) return JSON.stringify({{visible: false, reason: 'not_found'}});
+                # ✅ IIFE (Immediately Invoked Function Expression) с .call(this)
+                # Это гарантирует, что this внутри функции указывает на DOM-элемент
+                vis_response = await element.execute_script("""
+                    return (function() {
+                        var el = this;
+                        if (!el) return JSON.stringify({visible: false, reason: 'not_found'});
 
-                        // el.disabled учитывает и атрибут и состояние DOM
                         if (el.disabled)
-                            return JSON.stringify({{visible: false, reason: 'disabled'}});
+                            return JSON.stringify({visible: false, reason: 'disabled'});
 
                         if ((el.getAttribute('aria-disabled') || '').toLowerCase() === 'true')
-                            return JSON.stringify({{visible: false, reason: 'aria_disabled'}});
+                            return JSON.stringify({visible: false, reason: 'aria_disabled'});
 
-                        // getComputedStyle — ловит скрытие через любой CSS
-                        // включая классы и родителей
                         var style = window.getComputedStyle(el);
                         if (style.display === 'none')
-                            return JSON.stringify({{visible: false, reason: 'display_none'}});
+                            return JSON.stringify({visible: false, reason: 'display_none'});
                         if (style.visibility === 'hidden')
-                            return JSON.stringify({{visible: false, reason: 'visibility_hidden'}});
+                            return JSON.stringify({visible: false, reason: 'visibility_hidden'});
                         if (style.opacity === '0')
-                            return JSON.stringify({{visible: false, reason: 'opacity_zero'}});
+                            return JSON.stringify({visible: false, reason: 'opacity_zero'});
                         if (style.pointerEvents === 'none')
-                            return JSON.stringify({{visible: false, reason: 'pointer_events_none'}});
+                            return JSON.stringify({visible: false, reason: 'pointer_events_none'});
 
-                        // getBoundingClientRect — ловит скрытие через нулевые размеры
                         var rect = el.getBoundingClientRect();
                         if (rect.width === 0 && rect.height === 0)
-                            return JSON.stringify({{visible: false, reason: 'zero_size'}});
+                            return JSON.stringify({visible: false, reason: 'zero_size'});
 
-                        return JSON.stringify({{visible: true, reason: 'ok'}});
-                    }})()
-                """)
+                        return JSON.stringify({visible: true, reason: 'ok'});
+                    }).call(this)
+                """, return_by_value=True)
+
+                # ✅ ПРАВИЛЬНЫЙ ПУТЬ ПАРСИНГА: двойной result (как в selector_finder.py)
                 vis_raw: str = (
                     vis_response.get("result", {}).get("result", {}).get("value") or ""
                 )
@@ -2058,7 +2126,7 @@ class RegistrationController:
                 logger.debug(f"Поле '{field_name}' уже содержит значение — пропускаем")
                 return "already_filled"
 
-            await self.browser.human_type(selector, value)
+            await self.browser.human_type(element, value)
 
             logger.info(f"Поле '{field_name}' успешно заполнено: {selector}")
             return "filled"
