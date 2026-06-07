@@ -1692,7 +1692,8 @@ class RegistrationController:
                         logger.debug(f"Чекбокс '{field_name}' не найден в DOM — пропускаем")
                         skipped_fields.append(field_name)
                     else:
-                        already_checked = element.get_attribute("checked") is not None
+                        _resp = await element.execute_script("return this.checked;", return_by_value=True)
+                        already_checked = bool(_resp.get("result", {}).get("result", {}).get("value", False))
                         if already_checked:
                             logger.info(f"Чекбокс '{field_name}' уже отмечен — пропускаем клик")
                         else:
@@ -1837,7 +1838,8 @@ class RegistrationController:
                             f"это кнопка, пропускаем"
                         )
                         continue
-                    already_checked = element.get_attribute("checked") is not None
+                    _resp = await element.execute_script("return this.checked;", return_by_value=True)
+                    already_checked = bool(_resp.get("result", {}).get("result", {}).get("value", False))
                     if already_checked:
                         logger.info(
                             f"Чекбокс согласия уже отмечен ({agree_selector}) — пропускаем клик"
@@ -1845,7 +1847,8 @@ class RegistrationController:
                     else:
                         await self.browser.human_click(element)
                         await asyncio.sleep(0.3)
-                        still_unchecked = element.get_attribute("checked") is None
+                        _resp = await element.execute_script("return this.checked;", return_by_value=True)
+                        still_unchecked = not bool(_resp.get("result", {}).get("result", {}).get("value", False))
                         if still_unchecked:
                             logger.debug(
                                 f"Чекбокс '{agree_selector}' не отмечен после клика — "
@@ -1869,7 +1872,8 @@ class RegistrationController:
                                     }})();
                                 """)
                                 await asyncio.sleep(0.3)
-                                checked_after = element.get_attribute("checked") is not None
+                                _resp = await element.execute_script("return this.checked;", return_by_value=True)
+                                checked_after = bool(_resp.get("result", {}).get("result", {}).get("value", False))
                                 logger.debug(
                                     f"Состояние чекбокса после fallback-клика: "
                                     f"{'отмечен' if checked_after else 'не отмечен'}"
