@@ -1079,7 +1079,7 @@ class RegistrationController:
 
         if new_form_selector:
             new_data["registration_page"] = {
-                "form_selector": [new_form_selector]
+                "form_selector": new_form_selector
             }
         if fields_to_save:
             new_data["fields"] = fields_to_save
