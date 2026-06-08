@@ -440,13 +440,22 @@ class SelectorFinder:
                         pass
 
                 # Жёсткое исключение если поля содержат нежелательные keywords
-                # (newsletter/subscribe и т.д.) — логика из оригинала сохранена
-                combined_fields = " ".join(field_tokens).lower()
-                if field_tokens and any(kw in combined_fields for kw in skip_field_kw):
-                    logger.debug(
-                        f"[{selector}] Исключён по полям: найден нежелательный keyword"
-                    )
-                    continue
+                # (newsletter/subscribe и т.д.) — используем строгие границы слова (\b)
+                # чтобы "subscribe" не срабатывал на "pf_subscribe"
+                combined_fields = "  ".join(field_tokens).lower()
+                if field_tokens:
+                    has_unwanted = False
+                    for kw in skip_field_kw:
+                        pattern = rf'\b{re.escape(kw)}\b'
+                        if re.search(pattern, combined_fields):
+                            has_unwanted = True
+                            break
+                    
+                    if has_unwanted:
+                        logger.debug(
+                            f"[{selector}] Исключён по полям: найден нежелательный keyword (строгое совпадение)"
+                        )
+                        continue
 
                 # Шаг 4: подсчёт score
                 score = 0
@@ -1379,6 +1388,106 @@ class SelectorFinder:
 
         logger.info(f"Проанализировано блоков: {len(result)}")
         return result
+
+    async def validate_registration_page(
+        self,
+        template: dict | None = None,
+    ) -> dict:
+        """Проверяет, является ли текущая страница страницей регистрации.
+    
+        Критерий: наличие элемента согласия (agree_checkbox, register_radio)
+        или элементов из template.agree_step в DOM.
+    
+        Args:
+            template: Текущий шаблон для проверки agree_step.
+    
+        Returns:
+            dict с ключами:
+                is_valid: bool — страница является страницей регистрации
+                found_trigger: str — какой триггер найден
+                blocks: list[dict] — результат analyze_current_page
+        """
+        blocks = await self.analyze_current_page(template=template)
+    
+        if not blocks:
+            logger.info("❌ Валидация: блоки не найдены")
+            return {"is_valid": False, "found_trigger": "", "blocks": []}
+    
+        best_block = blocks[0]
+        form_selector = best_block.get("form_selector", "")
+    
+        # Проверка 1: agree_checkbox в блоке
+        if best_block.get("agree_checkbox"):
+            logger.info(
+                f"✅ Страница подтверждена (trigger=agree_checkbox, "
+                f"block={form_selector})"
+            )
+            return {
+                "is_valid": True,
+                "found_trigger": "agree_checkbox",
+                "blocks": blocks,
+            }
+    
+        # Проверка 2: register_radio в блоке
+        if best_block.get("register_radio"):
+            logger.info(
+                f"✅ Страница подтверждена (trigger=register_radio, "
+                f"block={form_selector})"
+            )
+            return {
+                "is_valid": True,
+                "found_trigger": "register_radio",
+                "blocks": blocks,
+            }
+    
+        # Проверка 3: submit_button с текстом регистрации в блоке
+        submit_label = (best_block.get("submit_button_label") or "").lower()
+        if submit_label:
+            submit_keywords = [
+                k.lower() for k in self.common_fields.get("submit_keywords", [])
+            ]
+            if any(kw in submit_label for kw in submit_keywords):
+                logger.info(
+                    f"✅ Страница подтверждена "
+                    f"(trigger=submit_button:{submit_label[:30]}, "
+                    f"block={form_selector})"
+                )
+                return {
+                    "is_valid": True,
+                    "found_trigger": f"submit_button:{submit_label[:30]}",
+                    "blocks": blocks,
+                }
+    
+        # Проверка 4: элементы из template.agree_step в DOM
+        if template:
+            agree_step = template.get("agree_step") or {}
+            checkboxes = agree_step.get("checkboxes") or []
+            submit_buttons = agree_step.get("submit_button") or []
+    
+            for sel in checkboxes + submit_buttons:
+                if not sel:
+                    continue
+                try:
+                    element = await self.page.query(sel, timeout=3, raise_exc=False)
+                    if element:
+                        logger.info(
+                            f"✅ Страница подтверждена "
+                            f"(trigger=template_agree_step: {sel})"
+                        )
+                        return {
+                            "is_valid": True,
+                            "found_trigger": f"template_agree_step:{sel}",
+                            "blocks": blocks,
+                        }
+                except Exception:
+                    pass
+    
+        logger.info(
+            "❌ Страница не является страницей регистрации: "
+            "триггеры согласия не найдены"
+        )
+        return {"is_valid": False, "found_trigger": "", "blocks": blocks}
+
 
 def _default_common_fields() -> dict:
     """Возвращает значения common_fields по умолчанию."""

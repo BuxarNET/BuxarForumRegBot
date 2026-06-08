@@ -63,11 +63,26 @@
       "humanverify[input]": [
         "дороги"
       ],
-      "dst": []
+      "dst": [],
+      "pf_family": [
+        "Разведен"
+      ],
+      "pf_subscribe": [
+        "2"
+      ],
+      "tz": [
+        "3"
+      ],
+      "pf_real_name": [
+        "Виталий"
+      ],
+      "qa_answer2": [
+        "декабрь"
+      ]
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-08T06:52:30",
+    "last_attempt": "2026-06-08T12:02:12",
     "last_error": {
       "reason": "no_form_detected",
       "proxy_used": null

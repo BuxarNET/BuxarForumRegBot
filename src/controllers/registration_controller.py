@@ -134,15 +134,28 @@ class RegistrationController:
         # и переданы в register как аргументы
 
         try:
-            # Переходим на страницу регистрации, используя готовый шаблон (или эвристику)
-            await self._navigate_to_registration_page(template=template)
-
+            # Переходим на страницу регистрации с валидацией
+            all_blocks = await self._navigate_to_registration_page(
+                template=template,
+                engine_name=engine_name,
+            )
+    
             username_was_filled = False  # Флаг: логин уже был заполнен в этой сессии
             max_steps = 5
-
-            # Получаем список всех блоков на странице (отсортированы по score)
-            all_blocks = await self.selector_finder.analyze_current_page(template=template)
-            if not all_blocks:
+    
+            # Различаем None (навигация провалилась) и [] (страница без блоков)
+            if all_blocks is None:
+                logger.warning("Навигация на страницу регистрации провалилась")
+                return {
+                    "success": False,
+                    "message": "Не удалось перейти на страницу регистрации",
+                    "reason": "registration_page_not_found",
+                    "template_used": template.get("name") if template else None,
+                    "screenshot": None,
+                    "form_data": account_data
+                }
+    
+            if not all_blocks:  # [] — пустой список
                 logger.warning("Блоки регистрации не найдены на странице")
                 return {
                     "success": False,
@@ -1598,67 +1611,144 @@ class RegistrationController:
         except Exception as e:
             logger.warning(f"Не удалось сохранить поля в профиль: {e}")
             
-    async def _navigate_to_registration_page(self, template: dict | None) -> bool:
-        """Переходит на страницу регистрации.
-    
-        Сначала пробует шаблон, затем ищет ссылку эвристически.
-    
+    async def _navigate_to_registration_page(
+        self,
+        template: dict | None,
+        engine_name: str | None = None,
+    ) -> list[dict] | None:
+        """Переходит на страницу регистрации с валидацией.
+
+        Перебирает URL из шаблона, проверяя каждый через validate_registration_page.
+        Если ни один не подошёл — ищет ссылку эвристически.
+        Если и это не помогло — запрашивает ручное открытие.
+
+        Сохраняет найденный рабочий URL в шаблон через update_template.
+
+        Args:
+            template: Текущий шаблон.
+            engine_name: Название движка для сохранения URL в шаблон.
+
         Returns:
-            True если перешли на страницу регистрации, False если не нашли.
+            list[dict] — блоки формы (результат analyze_current_page)
+            [] — страница загрузилась, но блоков не найдено
+            None — навигация полностью провалилась (timeout, ошибка)
         """
+        page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
+
+        # Вспомогательная функция: извлечение относительного пути из URL
+        def _extract_relative_path(url: str) -> str:
+            """Извлекает относительный путь из абсолютного URL."""
+            try:
+                parsed = urlparse(url)
+                path = parsed.path
+                if parsed.query:
+                    path += f"?{parsed.query}"
+                return path
+            except Exception:
+                return url
+
+        # === ЭТАП 1: Перебор URL из шаблона ===
         if template:
             reg_page = template.get("registration_page", {})
             reg_url = reg_page.get("url")
             if isinstance(reg_url, list) and reg_url:
                 current_url = await self.page.current_url
                 parsed = urlparse(current_url)
-                # Обрезаем последний сегмент пути (файл/страница)
-                # /forum_vb/showthread.php → /forum_vb
-                # /index.php              → (пусто)
                 base_path = parsed.path.rsplit("/", 1)[0]
                 base_url = f"{parsed.scheme}://{parsed.netloc}{base_path}"
+
                 for idx, url_variant in enumerate(reg_url):
                     variant_clean = url_variant.lstrip("/")
                     full_url = f"{base_url}/{variant_clean}" if variant_clean else base_url
+
                     logger.debug(
                         f"Пробуем вариант URL регистрации "
                         f"[{idx + 1}/{len(reg_url)}]: {full_url}"
                     )
+
                     try:
                         await self.browser.goto(full_url)
-                        logger.info(
-                            f"Перешли на страницу регистрации по шаблону: {full_url}"
+                        await asyncio.sleep(page_load_wait)
+                        logger.info(f"Перешли на URL: {full_url} — валидируем...")
+
+                        validation = await self.selector_finder.validate_registration_page(
+                            template=template,
                         )
-                        return True
+
+                        if validation["is_valid"]:
+                            logger.info(
+                                f"✅ URL из шаблона подтверждён: {full_url} "
+                                f"(trigger={validation['found_trigger']})"
+                            )
+                            return validation["blocks"]
+                        else:
+                            logger.warning(
+                                f"URL не прошёл валидацию: {full_url} "
+                                f"— пробуем следующий"
+                            )
+
                     except Exception as e:
                         logger.debug(
                             f"Вариант [{idx + 1}/{len(reg_url)}] недоступен "
                             f"({type(e).__name__}): {full_url}"
                         )
+
                 logger.debug(
-                    "Все варианты URL из шаблона не сработали — "
+                    "Все варианты URL из шаблона не прошли валидацию — "
                     "переходим к эвристике"
                 )
-                
-        # Эвристика запускается в трёх случаях:
-        # 1. template = None — движок не определён, шаблона нет
-        # 2. reg_url = [] — шаблон есть, но URL регистрации не указан
-        # 3. Все варианты URL из шаблона не сработали (недоступны)
-        # Ищем ссылку на регистрацию на текущей странице форума
+
+        # === ЭТАП 2: Эвристический поиск ссылки ===
         logger.info("Ищем ссылку на регистрацию...")
         reg_link = await self.selector_finder.find_registration_link()
-        if reg_link:
-            await self.browser.goto(reg_link)
-            logger.info(f"Перешел на страницу регистрации: {reg_link}")
-            return True
-    
-        # Возможно уже на странице регистрации
-        current_url = await self.page.current_url
-        if any(kw in current_url.lower() for kw in ["register", "signup", "регистр"]):
-            logger.info("Уже на странице регистрации (проверка URL)")
-            return True
 
-        logger.warning("Автоматический переход на страницу регистрации не удался — запрашиваем ручное открытие")
+        if reg_link:
+            try:
+                await self.browser.goto(reg_link)
+                await asyncio.sleep(page_load_wait)
+                logger.info(f"Перешли по найденной ссылке: {reg_link} — валидируем...")
+
+                validation = await self.selector_finder.validate_registration_page(
+                    template=template,
+                )
+
+                if validation["is_valid"]:
+                    logger.info(
+                        f"✅ Найденная ссылка подтверждена: {reg_link} "
+                        f"(trigger={validation['found_trigger']})"
+                    )
+
+                    # Сохраняем относительный путь в шаблон
+                    if engine_name and self.template_manager:
+                        relative_path = _extract_relative_path(reg_link)
+                        try:
+                            await self.template_manager.update_template(
+                                engine_name=engine_name,
+                                new_data={
+                                    "registration_page": {"url": relative_path}
+                                },
+                            )
+                            logger.info(
+                                f"URL сохранён в шаблон: {relative_path}"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Не удалось сохранить URL в шаблон: {e}")
+
+                    return validation["blocks"]
+                else:
+                    logger.warning(
+                        f"Найденная ссылка не прошла валидацию: {reg_link}"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Не удалось перейти по ссылке {reg_link}: {e}")
+
+        # === ЭТАП 3: Ручное вмешательство ===
+        logger.warning(
+            "Автоматический переход на страницу регистрации не удался — "
+            "запрашиваем ручное открытие"
+        )
+
         timeout = self.config.get("MANUAL_FIELD_FILL_TIMEOUT", 120)
         print("\n" + "=" * 60)
         print("⚠️  Не удалось автоматически перейти на страницу регистрации.")
@@ -1667,17 +1757,57 @@ class RegistrationController:
         print("и нажмите Enter, чтобы продолжить.")
         print(f"Ожидание: {timeout} секунд.")
         print("=" * 60)
+
         try:
             await asyncio.wait_for(
                 asyncio.get_running_loop().run_in_executor(None, input, ">>> "),
                 timeout=timeout,
             )
-            logger.info("Пользователь подтвердил открытие формы регистрации вручную")
-            return True
+
+            # После ручного открытия ждём загрузку
+            await asyncio.sleep(page_load_wait)
+
+            validation = await self.selector_finder.validate_registration_page(
+                template=template,
+            )
+
+            # Сохраняем URL ручного ввода (если engine_name задан)
+            if engine_name and self.template_manager:
+                current_url = await self.page.current_url
+                relative_path = _extract_relative_path(current_url)
+                try:
+                    await self.template_manager.update_template(
+                        engine_name=engine_name,
+                        new_data={
+                            "registration_page": {"url": relative_path}
+                        },
+                    )
+                    logger.info(
+                        f"URL из ручного выбора сохранён в шаблон: {relative_path}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Не удалось сохранить URL в шаблон: {e}")
+
+            # НЕ прерываем даже если validation["is_valid"] is False
+            # Оператор открыл страницу — доверяем ему
+            if validation["is_valid"]:
+                logger.info(
+                    f"✅ Пользователь открыл страницу регистрации "
+                    f"(trigger={validation['found_trigger']})"
+                )
+            else:
+                logger.warning(
+                    "Страница, открытая пользователем, "
+                    "не прошла валидацию — продолжаем работу"
+                )
+
+            # Возвращаем blocks в любом случае (может быть пустой список)
+            return validation["blocks"]
+
         except asyncio.TimeoutError:
             logger.warning(f"Таймаут ожидания ручного открытия формы ({timeout}с)")
-            logger.warning("Страница регистрации не найдена")
-            return False
+            logger.warning("Навигация полностью провалилась")
+            return None
         
     async def _fill_fields(
         self,
