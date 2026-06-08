@@ -29,7 +29,8 @@
         "#register"
       ],
       "#agreement",
-      "form[action='./ucp.php?mode=register']"
+      "form[action='./ucp.php?mode=register']",
+      "#regformid"
     ]
   },
   "agree_step": {
@@ -53,16 +54,19 @@
     ],
     "confirm_password": [
       "input[name='password_confirm']",
-      "#password_confirm"
+      "#password_confirm",
+      "#psw2"
     ],
     "agree_checkbox": [
-      "input[name='agreed']"
+      "input[name='agreed']",
+      "input[name='agreement']"
     ],
     "submit_button": [
       "input[type='submit'][name='submit']",
       "#agreed",
       "#submit",
-      "#agreede"
+      "#agreede",
+      "input[name='submit']"
     ],
     "captcha_indicator": [],
     "lang": [
@@ -84,7 +88,8 @@
       "Пароль:"
     ],
     "confirm_password_label": [
-      "Подтвердите новый пароль:"
+      "Подтвердите новый пароль:",
+      "Подтвердите пароль:*"
     ],
     "confirm_email": [
       "#email_confirm",
@@ -96,7 +101,8 @@
     "submit_button_label": [
       "Я соглашаюсь с этими условиями",
       "Отправить",
-      "Я согласен с этими условиями"
+      "Я согласен с этими условиями",
+      "Зарегистрироваться"
     ],
     "pf_family": [
       "#pf_family"
@@ -106,6 +112,9 @@
     ],
     "pf_real_name": [
       "input[name='pf_real_name']"
+    ],
+    "namep[1]": [
+      "#inm1"
     ]
   },
   "custom_fields": [],

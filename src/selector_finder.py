@@ -42,6 +42,34 @@ class SelectorFinder:
         self.template_manager = template_manager
         self._common_fields_path = Path(common_fields_path)
         self.common_fields: dict = {}
+        
+    @staticmethod
+    def _keyword_match(text: str, keywords: list[str], word_boundary: bool = True) -> bool:
+        """Проверяет совпадение текста с ключевыми словами.
+
+        Args:
+            text: Текст для поиска (уже в lower case).
+            keywords: Список ключевых слов (уже в lower case).
+            word_boundary: True — кастомная граница слова
+                          (_ считается разделителем, [a-zA-Z0-9] — нет),
+                          False — поиск подстроки (in).
+
+        Returns:
+            True если найдено хотя бы одно совпадение.
+        """
+        if not text or not keywords:
+            return False
+
+        if word_boundary:
+            for kw in keywords:
+                # Кастомная граница: _ считается разделителем
+                pattern = rf'(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+            return False
+        else:
+            return any(kw in text for kw in keywords)
+
 
     async def _ensure_common_fields(self) -> None:
         """Загружает common_fields.json если ещё не загружен."""
@@ -295,13 +323,13 @@ class SelectorFinder:
                 # Штраф за форму логина по action/name/id (не исключаем жёстко —
                 # форум с объединённой формой логина/регистрации должен остаться кандидатом)
                 login_form_penalty = False
-                if any(kw in action for kw in skip_action_kw):
+                if self._keyword_match(action, skip_action_kw):
                     logger.debug(f"[{selector}] Штраф -20 по action='{action}'")
                     login_form_penalty = True
-                elif any(kw in name for kw in skip_name_kw):
+                elif self._keyword_match(name, skip_name_kw):
                     logger.debug(f"[{selector}] Штраф -20 по name='{name}'")
                     login_form_penalty = True
-                elif any(kw in form_id for kw in skip_name_kw):
+                elif self._keyword_match(form_id, skip_name_kw):
                     logger.debug(f"[{selector}] Штраф -20 по id='{form_id}'")
                     login_form_penalty = True
 
@@ -402,7 +430,7 @@ class SelectorFinder:
                         inp_id = (inp.get_attribute("id") or "").lower()
                         inp_type = (inp.get_attribute("type") or "").lower()
                         combined = f"{name} {inp_id} {inp_type}"
-                        if not any(kw in combined for kw in skip_field_kw):
+                        if not self._keyword_match(combined, skip_field_kw, word_boundary=False):
                             all_skip = False
                             break
                     if all_skip:
@@ -445,11 +473,8 @@ class SelectorFinder:
                 combined_fields = "  ".join(field_tokens).lower()
                 if field_tokens:
                     has_unwanted = False
-                    for kw in skip_field_kw:
-                        pattern = rf'\b{re.escape(kw)}\b'
-                        if re.search(pattern, combined_fields):
-                            has_unwanted = True
-                            break
+                    if self._keyword_match(combined_fields, skip_field_kw):
+                        has_unwanted = True
                     
                     if has_unwanted:
                         logger.debug(
@@ -472,7 +497,7 @@ class SelectorFinder:
                 # поведение для приоритизации форм с отдельной регистрацией
                 combined_form = " ".join(form_tokens).lower()
                 skip_kws = skip_action_kw + skip_name_kw
-                if any(kw in combined_form for kw in skip_kws):
+                if self._keyword_match(combined_form, skip_kws):
                     score -= 20
                     score_details.append("form_tokens_penalty(-20)")
 
@@ -510,13 +535,13 @@ class SelectorFinder:
                     inp_type = (inp.get_attribute("type") or "").lower()
                     combined = f"{name} {inp_id} {placeholder} {inp_type}"
 
-                    if inp_type == "password" or any(kw in combined for kw in password_kw):
+                    if inp_type == "password" or self._keyword_match(combined, password_kw):
                         score += 5
                         score_details.append(f"{name or inp_id}(password_kw+5)")
-                    elif any(kw in combined for kw in username_kw):
+                    elif self._keyword_match(combined, username_kw):
                         score += 5
                         score_details.append(f"{name or inp_id}(username_kw+5)")
-                    elif any(kw in combined for kw in email_kw):
+                    elif self._keyword_match(combined, email_kw):
                         score += 5
                         score_details.append(f"{name or inp_id}(email_kw+5)")
 
@@ -527,12 +552,12 @@ class SelectorFinder:
                     cb_val = (cb.get_attribute("value") or "").lower()
                     cb_display = await self._get_display_text(cb)
                     combined = f"{name} {cb_id} {cb_val} {cb_display.lower()}"
-                    if any(kw in combined for kw in agree_kw):
+                    if self._keyword_match(combined, agree_kw):
                         score += 3
                         # Показываем источник совпадения для отладки
                         match_source = (
                             "display_text"
-                            if any(kw in cb_display.lower() for kw in agree_kw)
+                            if self._keyword_match(cb_display.lower(), agree_kw)
                             else "attrs"
                         )
                         score_details.append(
@@ -550,7 +575,7 @@ class SelectorFinder:
                     ):
                         score += 10
                         score_details.append(f"'{btn_text[:20]}'(submit_label+10)")
-                    if any(kw in btn_text for kw in submit_kw):
+                    if self._keyword_match(btn_text, submit_kw):
                         score += 2
                         score_details.append(f"'{btn_text[:20]}'(submit_kw+2)")
 
@@ -558,19 +583,21 @@ class SelectorFinder:
                 # username без email → скорее всего форма логина
                 # email без username → скорее всего форма логина
                 has_username = any(
-                    any(kw in (
-                        (inp.get_attribute("name") or "") + " " +
-                        (inp.get_attribute("id") or "") + " " +
-                        (inp.get_attribute("placeholder") or "")
-                    ).lower() for kw in username_kw)
+                    self._keyword_match(
+                        ((inp.get_attribute("name") or "") + " " +
+                         (inp.get_attribute("id") or "") + " " +
+                         (inp.get_attribute("placeholder") or "")).lower(),
+                        username_kw
+                    )
                     for inp in visible_inputs
                 )
                 has_email = any(
-                    any(kw in (
-                        (inp.get_attribute("name") or "") + " " +
-                        (inp.get_attribute("id") or "") + " " +
-                        (inp.get_attribute("placeholder") or "")
-                    ).lower() for kw in email_kw)
+                    self._keyword_match(
+                        ((inp.get_attribute("name") or "") + " " +
+                         (inp.get_attribute("id") or "") + " " +
+                         (inp.get_attribute("placeholder") or "")).lower(),
+                        email_kw
+                    )
                     for inp in visible_inputs
                 )
                 if has_username and not has_email:
@@ -882,7 +909,7 @@ class SelectorFinder:
                     or (el_tag == "button" and not el_type)
                 )
 
-                has_keyword = any(kw in combined_btn for kw in submit_keywords)
+                has_keyword = self._keyword_match(combined_btn, submit_keywords)
                 has_text = bool(display_text.strip())
                 has_template_label = bool(
                     tmpl_label_lower
@@ -1039,7 +1066,7 @@ class SelectorFinder:
                             explain_text: str = (hp_data.get("explainText") or "").lower()
                             is_honeypot: bool = (
                                 "limited" in parent_class
-                                or any(kw in explain_text for kw in honeypot_keywords)
+                                or self._keyword_match(explain_text, honeypot_keywords, word_boundary=False)
                             )
                             if is_honeypot:
                                 logger.debug(f"Honeypot-поле пропущено: {selector}")
@@ -1086,14 +1113,14 @@ class SelectorFinder:
                 # Проверка по id, name, class элемента (display_text исключён для избежания ложных срабатываний)
                 element_class: str = (attrs.get("class") or "").lower()
                 field_combined: str = f"{name} {el_id} {element_class}"
-                if any(kw in field_combined for kw in service_field_keywords):
+                if self._keyword_match(field_combined, service_field_keywords, word_boundary=False):
                     logger.debug(f"Служебное поле капчи пропущено: {selector}")
                     continue
 
                 # Password поля
                 if field_type == "password":
                     password_count += 1
-                    if any(kw in combined for kw in confirm_keywords):
+                    if self._keyword_match(combined, confirm_keywords):
                         result["confirm_password"] = selector
                         if display_text:
                             result["confirm_password_label"] = display_text
@@ -1112,10 +1139,10 @@ class SelectorFinder:
 
                 # Чекбоксы
                 if field_type == "checkbox":
-                    if any(kw in combined for kw in checkbox_skip_keywords):
+                    if self._keyword_match(combined, checkbox_skip_keywords):
                         logger.debug(f"Пропускаем нежелательный чекбокс: {selector} | '{display_text}'")
                         continue
-                    if any(kw in combined for kw in agree_keywords):
+                    if self._keyword_match(combined, agree_keywords):
                         if "agree_checkbox" not in result:
                             result["agree_checkbox"] = []
                         if selector not in result["agree_checkbox"]:
@@ -1139,7 +1166,7 @@ class SelectorFinder:
                 # Radio-кнопки
                 if field_type == "radio":
                     # 1. register_radio (шлюз формы)
-                    if any(kw in combined for kw in register_radio_keywords):
+                    if self._keyword_match(combined, register_radio_keywords):
                         if "register_radio" not in result:
                             result["register_radio"] = selector
                             result["register_radio_value"] = attrs.get("value", "")
@@ -1176,26 +1203,41 @@ class SelectorFinder:
                         logger.debug(f"Не удалось собрать опции radio {group_selector}: {e}")
                         options = []
                 
-                    # Защита от дубликатов (одна группа на name)
-                    if not any(f.get("name") == radio_name and f.get("type") == "radio" for f in result["custom_fields"]):
-                        # Определяем семантический тип через known_field_types
-                        matched_type = next(
-                            (tn for tn, kw in known_field_types if any(k.lower() in combined for k in kw)),
-                            None
-                        )
+                    # Определяем семантический тип через known_field_types
+                    # Используем _keyword_match с границами слова:
+                    # "пол" не должен матчить "notifyreply" или "display_text"
+                    matched_type = None
+                    for type_name, keywords in known_field_types:
+                        if self._keyword_match(combined, [k.lower() for k in keywords]):
+                            matched_type = type_name
+                            break
+    
+                    field_name_for_cf = matched_type or radio_name
+    
+                    # Защита от дубликатов — сравниваем по selector (уникален для группы),
+                    # а не по name (семантический тип может совпадать у разных групп)
+                    if not any(
+                        f.get("selector") == group_selector and f.get("type") == "radio"
+                        for f in result["custom_fields"]
+                    ):
                         result["custom_fields"].append({
-                            "name": matched_type or radio_name,
+                            "name": field_name_for_cf,
                             "selector": group_selector,
                             "type": "radio",
                             "options": options,
                             "display_text": display_text,
                         })
-                        logger.debug(f"Добавлена radio-группа: {matched_type or radio_name} ({group_selector})")
+                        logger.debug(f"Добавлена radio-группа: {field_name_for_cf} ({group_selector})")
+                    else:
+                        logger.debug(
+                            f"Пропущен дубликат radio-группы: {field_name_for_cf} "
+                            f"({group_selector}) — уже есть"
+                        )
                     continue  # Не проваливаемся в email/username
 
                 # Email поля
-                if field_type == "email" or any(kw in combined for kw in email_keywords):
-                    if any(kw in combined for kw in confirm_email_keywords):
+                if field_type == "email" or self._keyword_match(combined, email_keywords):
+                    if self._keyword_match(combined, confirm_email_keywords):
                         # Точное определение confirm_email по ключевым словам
                         result["confirm_email"] = selector
                         if display_text:
@@ -1216,7 +1258,7 @@ class SelectorFinder:
                     continue
 
                 # Username поля
-                if any(kw in combined for kw in username_keywords):
+                if self._keyword_match(combined, username_keywords):
                     if "username" not in result:
                         result["username"] = selector
                         if display_text:
@@ -1226,14 +1268,9 @@ class SelectorFinder:
 
                 matched_type = None
                 for type_name, keywords in known_field_types:
-                    for kw in keywords:
-                        # \b означает границу слова. re.escape защищает от спецсимволов.
-                        pattern = rf'\b{re.escape(kw)}\b'
-                        if re.search(pattern, combined, re.IGNORECASE):
-                            matched_type = type_name
-                            break  # Прерываем внутренний цикл по ключевым словам
-                    if matched_type:
-                        break  # Прерываем внешний цикл, если тип уже найден
+                    if self._keyword_match(combined, [k.lower() for k in keywords]):
+                        matched_type = type_name
+                        break
             
                 # Неизвестные поля — в custom_fields
                 field_label = (
@@ -1558,7 +1595,7 @@ class SelectorFinder:
             submit_keywords = [
                 k.lower() for k in self.common_fields.get("submit_keywords", [])
             ]
-            if any(kw in submit_label for kw in submit_keywords):
+            if self._keyword_match(submit_label, submit_keywords):
                 logger.info(
                     f"✅ Страница подтверждена "
                     f"(trigger=submit_button:{submit_label[:30]}, "
@@ -1670,7 +1707,7 @@ class SelectorFinder:
                 
                 # Ищем слова-действия из agree_keywords
                 for kw in agree_keywords:
-                    if kw in action_words and kw in link_text:
+                    if kw in action_words and self._keyword_match(link_text, [kw], word_boundary=False):
                         href = link.get("href", "")
                         logger.info(
                             f"✅ Найдена ссылка согласия (action): "
@@ -1685,7 +1722,7 @@ class SelectorFinder:
                     continue
                 
                 for kw in agree_keywords:
-                    if kw in link_text:
+                    if self._keyword_match(link_text, [kw], word_boundary=False):
                         href = link.get("href", "")
                         logger.info(
                             f"✅ Найдена ссылка согласия (fallback): "
