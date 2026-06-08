@@ -254,7 +254,7 @@ class RegistrationController:
                 # Если страница не загрузилась — выполняем refresh с увеличенным ожиданием.
                 # Перенесено сюда из _check_result чтобы _check_block_changed
                 # тоже получал уже загруженную страницу.
-                page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
+                page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 30.0)
                 page_reload_timeout: float = self.config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60.0)
                 min_content_length: int = self.config.get("MIN_PAGE_CONTENT_LENGTH", 300)
 
@@ -300,12 +300,273 @@ class RegistrationController:
                     except Exception as e:
                         logger.error(f"Ошибка refresh страницы: {e}")
 
+                # Проверка AJAX-индикаторов СРАЗУ после submit
+                # Ловим ошибки валидации (email already taken) до анализа блока
+                logger.debug("Проверяем AJAX-индикаторы сразу после submit")
+                success, error_reason = await self._check_result(
+                    template=template,
+                    username_was_filled=username_was_filled,
+                    engine_name=engine_name,
+                )
+                logger.debug(
+                    f"Результат проверки сразу после submit: success={success}, "
+                    f"error_reason={error_reason}"
+                )
+    
+                # Фатальная ошибка
+                if error_reason and error_reason != "no_indicators":
+                    screenshot_path = await self._take_screenshot(
+                        prefix="error",
+                        username=account_data.get("username"),
+                    )
+                    logger.warning(
+                        f"Регистрация не удалась [{account_data['username']}]: {error_reason}"
+                    )
+                    test_result = await self._confirm_test_mode(
+                        step_num=step_num,
+                        success=False,
+                        error_reason=error_reason,
+                    )
+                    if test_result is True:
+                        await self._save_block_to_template(
+                            block=current_block,
+                            selectors=selectors,
+                            filled_fields=filled_fields,
+                            template=template,
+                            engine_name=engine_name,
+                            new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                            new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                            found_submit=fill_result.get("found_submit") if fill_result else None,
+                        )
+                        await self._save_filled_to_profile(
+                            filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                            skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                            account_data=account_data,
+                            username=account_data.get("username", ""),
+                        )
+                        return {
+                            "success": True,
+                            "message": "Регистрация завершена успешно (подтверждено в тесте)",
+                            "reason": None,
+                            "template_used": template.get("name") if template else "heuristic",
+                            "screenshot": None,
+                            "form_data": account_data,
+                        }
+                    return {
+                        "success": False,
+                        "message": f"Регистрация не удалась: {error_reason}",
+                        "reason": error_reason,
+                        "template_used": template.get("name") if template else "heuristic",
+                        "screenshot": screenshot_path,
+                        "form_data": account_data,
+                    }
+    
+                # Успех
+                if success:
+                    test_result = await self._confirm_test_mode(
+                        step_num=step_num,
+                        success=True,
+                        error_reason=None,
+                    )
+                    if test_result is False:
+                        current_block_index += 1
+                        continue
+                    logger.info(f"Регистрация завершена успешно: {account_data['username']}")
+                    await self._save_block_to_template(
+                        block=current_block,
+                        selectors=selectors,
+                        filled_fields=filled_fields,
+                        template=template,
+                        engine_name=engine_name,
+                        new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                        new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                        found_submit=fill_result.get("found_submit") if fill_result else None,
+                    )
+                    await self._save_filled_to_profile(
+                        filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                        skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                        account_data=account_data,
+                        username=account_data.get("username", ""),
+                    )
+                    return {
+                        "success": True,
+                        "message": "Регистрация завершена успешно",
+                        "reason": None,
+                        "template_used": template.get("name") if template else "heuristic",
+                        "screenshot": None,
+                        "form_data": account_data,
+                    }
+    
+                logger.debug("AJAX-индикаторов не найдено — продолжаем анализ блока")
+
                 # Правило 1 — проверяем изменился ли блок после submit
-                block_changed, has_any_fields, new_blocks = await self._check_block_changed(
+                block_changed, has_any_fields, new_blocks, captcha_appeared, new_selectors = await self._check_block_changed(
                     snapshot=block_snapshot,
                     form_selector=form_selector,
                     template=template,
                 )
+
+                # Обработка появления капчи после submit (второй вызов _handle_captcha)
+                if captcha_appeared:
+                    logger.info("Обнаружена капча после submit — запускаем обработку")
+                    captcha_ok = await self._handle_captcha(new_selectors)
+    
+                    if not captcha_ok:
+                        logger.warning("Капча не решена — регистрация не удалась")
+                        screenshot_path = await self._take_screenshot(
+                            prefix="captcha_failed",
+                            username=account_data.get("username"),
+                        )
+                        return {
+                            "success": False,
+                            "message": "Капча не решена",
+                            "reason": "captcha_failed",
+                            "template_used": template.get("name") if template else "heuristic",
+                            "screenshot": screenshot_path,
+                            "form_data": account_data,
+                        }
+    
+                    await asyncio.sleep(2)
+    
+                    # Проверяем AJAX-индикаторы после решения капчи
+                    logger.debug("Проверяем индикаторы после решения капчи")
+                    success, error_reason = await self._check_result(
+                        template=template,
+                        username_was_filled=username_was_filled,
+                        engine_name=engine_name,
+                    )
+                    logger.debug(
+                        f"Результат после капчи: success={success}, error_reason={error_reason}"
+                    )
+    
+                    # Фатальная ошибка после капчи
+                    if error_reason and error_reason != "no_indicators":
+                        screenshot_path = await self._take_screenshot(
+                            prefix="error",
+                            username=account_data.get("username"),
+                        )
+                        logger.warning(
+                            f"Регистрация не удалась [{account_data['username']}]: {error_reason}"
+                        )
+                        test_result = await self._confirm_test_mode(
+                            step_num=step_num,
+                            success=False,
+                            error_reason=error_reason,
+                        )
+                        if test_result is True:
+                            await self._save_block_to_template(
+                                block=current_block,
+                                selectors=selectors,
+                                filled_fields=filled_fields,
+                                template=template,
+                                engine_name=engine_name,
+                                new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                                new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                                found_submit=fill_result.get("found_submit") if fill_result else None,
+                            )
+                            await self._save_filled_to_profile(
+                                filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                                skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                                account_data=account_data,
+                                username=account_data.get("username", ""),
+                            )
+                            return {
+                                "success": True,
+                                "message": "Регистрация завершена успешно (подтверждено в тесте)",
+                                "reason": None,
+                                "template_used": template.get("name") if template else "heuristic",
+                                "screenshot": None,
+                                "form_data": account_data,
+                            }
+                        return {
+                            "success": False,
+                            "message": f"Регистрация не удалась: {error_reason}",
+                            "reason": error_reason,
+                            "template_used": template.get("name") if template else "heuristic",
+                            "screenshot": screenshot_path,
+                            "form_data": account_data,
+                        }
+    
+                    # Успех после капчи
+                    if success:
+                        test_result = await self._confirm_test_mode(
+                            step_num=step_num,
+                            success=True,
+                            error_reason=None,
+                        )
+                        if test_result is False:
+                            current_block_index += 1
+                            continue
+                        logger.info(f"Регистрация завершена успешно: {account_data['username']}")
+                        await self._save_block_to_template(
+                            block=current_block,
+                            selectors=selectors,
+                            filled_fields=filled_fields,
+                            template=template,
+                            engine_name=engine_name,
+                            new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                            new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                            found_submit=fill_result.get("found_submit") if fill_result else None,
+                        )
+                        await self._save_filled_to_profile(
+                            filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                            skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                            account_data=account_data,
+                            username=account_data.get("username", ""),
+                        )
+                        return {
+                            "success": True,
+                            "message": "Регистрация завершена успешно",
+                            "reason": None,
+                            "template_used": template.get("name") if template else "heuristic",
+                            "screenshot": None,
+                            "form_data": account_data,
+                        }
+    
+                    # no_indicators после капчи — повторяем анализ блока
+                    logger.debug("Капча решена, индикаторов нет — повторный анализ блока")
+                    block_changed, has_any_fields, new_blocks, _, _ = await self._check_block_changed(
+                        snapshot=block_snapshot,
+                        form_selector=form_selector,
+                        template=template,
+                    )
+    
+                    if block_changed and has_any_fields:
+                        await self._save_block_to_template(
+                            block=current_block,
+                            selectors=selectors,
+                            filled_fields=filled_fields,
+                            template=template,
+                            engine_name=engine_name,
+                            new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                            new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                            found_submit=fill_result.get("found_submit") if fill_result else None,
+                        )
+                        await self._save_filled_to_profile(
+                            filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                            skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                            account_data=account_data,
+                            username=account_data.get("username", ""),
+                        )
+                        all_blocks = new_blocks
+                        current_block_index = 0
+                        if not all_blocks:
+                            logger.warning("На новой странице блоки не найдены")
+                        continue
+    
+                    if block_changed and not has_any_fields:
+                        logger.debug(
+                            "Блок изменился после капчи, полей нет — "
+                            "переходим к проверке индикаторов"
+                        )
+                    else:
+                        logger.debug(
+                            f"Блок '{form_selector}' не изменился после капчи — "
+                            f"пробуем следующий блок"
+                        )
+                        current_block_index += 1
+                        continue
+
 
                 if block_changed and has_any_fields:
                     # Страница сменилась, есть поля — продолжаем регистрацию
@@ -343,7 +604,105 @@ class RegistrationController:
                         "переходим к проверке индикаторов"
                     )
                 else:
-                    # Блок не изменился — submit не сработал, пробуем следующий блок
+                    # Блок не изменился — проверяем AJAX-индикаторы перед переходом
+                    logger.debug(
+                        f"Блок '{form_selector}' не изменился — проверяем индикаторы"
+                    )
+                    success, error_reason = await self._check_result(
+                        template=template,
+                        username_was_filled=username_was_filled,
+                        engine_name=engine_name,
+                    )
+                    logger.debug(
+                        f"Результат в ветке block_changed=False: success={success}, "
+                        f"error_reason={error_reason}"
+                    )
+    
+                    # Фатальная ошибка
+                    if error_reason and error_reason != "no_indicators":
+                        screenshot_path = await self._take_screenshot(
+                            prefix="error",
+                            username=account_data.get("username"),
+                        )
+                        logger.warning(
+                            f"Регистрация не удалась [{account_data['username']}]: {error_reason}"
+                        )
+                        test_result = await self._confirm_test_mode(
+                            step_num=step_num,
+                            success=False,
+                            error_reason=error_reason,
+                        )
+                        if test_result is True:
+                            await self._save_block_to_template(
+                                block=current_block,
+                                selectors=selectors,
+                                filled_fields=filled_fields,
+                                template=template,
+                                engine_name=engine_name,
+                                new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                                new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                                found_submit=fill_result.get("found_submit") if fill_result else None,
+                            )
+                            await self._save_filled_to_profile(
+                                filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                                skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                                account_data=account_data,
+                                username=account_data.get("username", ""),
+                            )
+                            return {
+                                "success": True,
+                                "message": "Регистрация завершена успешно (подтверждено в тесте)",
+                                "reason": None,
+                                "template_used": template.get("name") if template else "heuristic",
+                                "screenshot": None,
+                                "form_data": account_data,
+                            }
+                        return {
+                            "success": False,
+                            "message": f"Регистрация не удалась: {error_reason}",
+                            "reason": error_reason,
+                            "template_used": template.get("name") if template else "heuristic",
+                            "screenshot": screenshot_path,
+                            "form_data": account_data,
+                        }
+    
+                    # Успех
+                    if success:
+                        test_result = await self._confirm_test_mode(
+                            step_num=step_num,
+                            success=True,
+                            error_reason=None,
+                        )
+                        if test_result is False:
+                            current_block_index += 1
+                            continue
+                        logger.info(f"Регистрация завершена успешно: {account_data['username']}")
+                        await self._save_block_to_template(
+                            block=current_block,
+                            selectors=selectors,
+                            filled_fields=filled_fields,
+                            template=template,
+                            engine_name=engine_name,
+                            new_custom_selectors=fill_result.get("new_custom_selectors", {}) if fill_result else {},
+                            new_checkboxes=fill_result.get("new_checkboxes", []) if fill_result else [],
+                            found_submit=fill_result.get("found_submit") if fill_result else None,
+                        )
+                        await self._save_filled_to_profile(
+                            filled_from_outside=fill_result.get("filled_from_outside", []) if fill_result else [],
+                            skipped_fields=fill_result.get("skipped", []) if fill_result else [],
+                            account_data=account_data,
+                            username=account_data.get("username", ""),
+                        )
+                        return {
+                            "success": True,
+                            "message": "Регистрация завершена успешно",
+                            "reason": None,
+                            "template_used": template.get("name") if template else "heuristic",
+                            "screenshot": None,
+                            "form_data": account_data,
+                        }
+    
+                    # no_indicators — пробуем следующий блок
                     logger.debug(
                         f"Блок '{form_selector}' не изменился — пробуем следующий блок"
                     )
@@ -732,12 +1091,8 @@ class RegistrationController:
         snapshot: frozenset[tuple[str, str, str, str, str]],
         form_selector: str,
         template: dict | None,
-    ) -> tuple[bool, bool, list[dict]]:
+    ) -> tuple[bool, bool, list[dict], bool, dict | None]:
         """Проверяет изменился ли блок после submit.
-
-        Сканирует страницу один раз и возвращает результаты сканирования
-        вместе с выводом — чтобы избежать повторного вызова analyze_current_page
-        в вызывающем коде.
 
         Args:
             snapshot: Снимок блока до submit из _make_block_snapshot.
@@ -745,15 +1100,16 @@ class RegistrationController:
             template: Текущий шаблон.
 
         Returns:
-            Кортеж (changed, has_any_fields, new_blocks):
+            Кортеж (changed, has_any_fields, new_blocks, captcha_appeared, new_selectors):
                 changed — True если блок изменился
                 has_any_fields — True если на странице есть хоть какие-то блоки/поля
                 new_blocks — результат analyze_current_page для переиспользования
+                captcha_appeared — True если появилась капча (требует обработки)
+                new_selectors — актуальные селекторы блока (только если captcha_appeared=True)
         """
         new_blocks = await self.selector_finder.analyze_current_page(template=template)
         has_any_fields = bool(new_blocks)
 
-        # Ищем тот же блок по form_selector
         same_block = next(
             (b for b in new_blocks if b["form_selector"] == form_selector),
             None,
@@ -763,9 +1119,8 @@ class RegistrationController:
             logger.debug(
                 f"Блок '{form_selector}' после submit не найден — изменение обнаружено"
             )
-            return True, has_any_fields, new_blocks
+            return True, has_any_fields, new_blocks, False, None
 
-        # Блок есть — делаем новый снимок и сравниваем
         new_selectors = await self._get_selectors_for_block(
             template=template,
             block=same_block,
@@ -773,17 +1128,43 @@ class RegistrationController:
         new_snapshot = self._make_block_snapshot(new_selectors)
 
         if new_snapshot != snapshot:
+            # Проверяем: отличается ли только появлением капчи?
+            captcha_in_old = any(
+                isinstance(e, tuple) and len(e) > 0 and e[0] == "captcha_indicator"
+                for e in snapshot
+            )
+            captcha_in_new = any(
+                isinstance(e, tuple) and len(e) > 0 and e[0] == "captcha_indicator"
+                for e in new_snapshot
+            )
+
+            if not captcha_in_old and captcha_in_new:
+                # Сравниваем снимки без капчи
+                snapshot_no_captcha = frozenset(
+                    e for e in snapshot
+                    if not (isinstance(e, tuple) and len(e) > 0 and e[0] == "captcha_indicator")
+                )
+                new_snapshot_no_captcha = frozenset(
+                    e for e in new_snapshot
+                    if not (isinstance(e, tuple) and len(e) > 0 and e[0] == "captcha_indicator")
+                )
+
+                if snapshot_no_captcha == new_snapshot_no_captcha:
+                    logger.info("После submit появилась капча (блок иначе не изменился)")
+                    return False, has_any_fields, new_blocks, True, new_selectors
+
             logger.debug(
                 f"Блок '{form_selector}' изменился после submit — "
                 f"было {len(snapshot)} элементов, стало {len(new_snapshot)}"
             )
-            return True, has_any_fields, new_blocks
+            return True, has_any_fields, new_blocks, False, None
 
         logger.debug(
             f"Блок '{form_selector}' не изменился после submit — "
             f"пробуем следующий блок"
         )
-        return False, has_any_fields, new_blocks
+        return False, has_any_fields, new_blocks, False, None
+
 
     async def _save_block_to_template(
         self,
@@ -1007,7 +1388,8 @@ class RegistrationController:
 
         # ── Блок Г: submit_button fallback ────────────────────────────────────
 
-        if found_submit_clean:
+        submit_source = selectors.get("submit_button_source", "")
+        if found_submit_clean and submit_source != "template":
             existing_submit = template_fields.get("submit_button")
             existing_submit_list = (
                 existing_submit if isinstance(existing_submit, list)
@@ -1065,7 +1447,19 @@ class RegistrationController:
                     f"Отсечён динамический form_selector: '{raw_form_selector}'"
                 )
             else:
-                new_form_selector = raw_form_selector
+                existing_fs = (
+                    (template or {})
+                    .get("registration_page", {})
+                    .get("form_selector", [])
+                )
+                if isinstance(existing_fs, str):
+                    existing_fs = [existing_fs]
+                if raw_form_selector not in existing_fs:
+                    new_form_selector = raw_form_selector
+                else:
+                    logger.debug(
+                        f"form_selector '{raw_form_selector}' уже в шаблоне → пропускаем"
+                    )
 
         # ── Проверка наличия данных для записи ───────────────────────────────
 
