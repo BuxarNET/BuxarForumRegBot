@@ -151,8 +151,10 @@ class RegistrationController:
                     "message": "Не удалось перейти на страницу регистрации",
                     "reason": "registration_page_not_found",
                     "template_used": template.get("name") if template else None,
-                    "screenshot": None,
-                    "form_data": account_data
+                    "screenshot": await self._take_screenshot(
+                        "nav_failed", account_data.get("username")
+                    ),
+                    "form_data": account_data,
                 }
     
             if not all_blocks:  # [] — пустой список
@@ -163,7 +165,7 @@ class RegistrationController:
                     "reason": "no_form_detected",
                     "template_used": template.get("name") if template else None,
                     "screenshot": None,
-                    "form_data": account_data
+                    "form_data": account_data,
                 }
 
             logger.info(f"Найдено блоков для перебора: {len(all_blocks)}")
@@ -1622,6 +1624,9 @@ class RegistrationController:
         Если ни один не подошёл — ищет ссылку эвристически.
         Если и это не помогло — запрашивает ручное открытие.
 
+        Обрабатывает многоэтапную регистрацию (phpBB): если на странице найдена
+        ссылка согласия, переходит по ней и повторно валидирует.
+
         Сохраняет найденный рабочий URL в шаблон через update_template.
 
         Args:
@@ -1631,11 +1636,10 @@ class RegistrationController:
         Returns:
             list[dict] — блоки формы (результат analyze_current_page)
             [] — страница загрузилась, но блоков не найдено
-            None — навигация полностью провалилась (timeout, ошибка)
+            None — навигация полностью провалилась (timeout ручного ввода)
         """
         page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
 
-        # Вспомогательная функция: извлечение относительного пути из URL
         def _extract_relative_path(url: str) -> str:
             """Извлекает относительный путь из абсолютного URL."""
             try:
@@ -1646,6 +1650,44 @@ class RegistrationController:
                 return path
             except Exception:
                 return url
+
+        async def _save_url_to_template(found_url: str) -> None:
+            """Сохраняет URL в шаблон через update_template."""
+            if not (engine_name and self.template_manager):
+                return
+            relative_path = _extract_relative_path(found_url)
+            try:
+                await self.template_manager.update_template(
+                    engine_name=engine_name,
+                    new_data={"registration_page": {"url": relative_path}},
+                )
+                logger.info(f"URL сохранён в шаблон: {relative_path}")
+            except Exception as e:
+                logger.warning(f"Не удалось сохранить URL в шаблон: {e}")
+
+        async def _handle_agree_link(validation: dict) -> dict:
+            """Обрабатывает ссылку согласия (многоэтапная регистрация).
+
+            Если validation содержит agree_link_href — выполняет goto по href
+            и возвращает результат повторной валидации. Иначе возвращает
+            validation без изменений.
+            """
+            if validation.get("found_trigger") != "agree_link":
+                return validation
+            href = validation.get("agree_link_href")
+            if not href:
+                return validation
+
+            logger.info(f"Переход по ссылке согласия: {href[:80]}")
+            try:
+                await self.browser.goto(href)
+                await asyncio.sleep(page_load_wait)
+                return await self.selector_finder.validate_registration_page(
+                    template=template,
+                )
+            except Exception as e:
+                logger.warning(f"Ошибка перехода по ссылке согласия: {e}")
+                return validation
 
         # === ЭТАП 1: Перебор URL из шаблона ===
         if template:
@@ -1659,21 +1701,27 @@ class RegistrationController:
 
                 for idx, url_variant in enumerate(reg_url):
                     variant_clean = url_variant.lstrip("/")
-                    full_url = f"{base_url}/{variant_clean}" if variant_clean else base_url
-
+                    full_url = (
+                        f"{base_url}/{variant_clean}"
+                        if variant_clean else base_url
+                    )
                     logger.debug(
                         f"Пробуем вариант URL регистрации "
                         f"[{idx + 1}/{len(reg_url)}]: {full_url}"
                     )
-
                     try:
                         await self.browser.goto(full_url)
                         await asyncio.sleep(page_load_wait)
-                        logger.info(f"Перешли на URL: {full_url} — валидируем...")
-
-                        validation = await self.selector_finder.validate_registration_page(
-                            template=template,
+                        logger.info(
+                            f"Перешли на URL: {full_url} — валидируем..."
                         )
+
+                        validation = (
+                            await self.selector_finder.validate_registration_page(
+                                template=template,
+                            )
+                        )
+                        validation = await _handle_agree_link(validation)
 
                         if validation["is_valid"]:
                             logger.info(
@@ -1686,7 +1734,6 @@ class RegistrationController:
                                 f"URL не прошёл валидацию: {full_url} "
                                 f"— пробуем следующий"
                             )
-
                     except Exception as e:
                         logger.debug(
                             f"Вариант [{idx + 1}/{len(reg_url)}] недоступен "
@@ -1706,49 +1753,50 @@ class RegistrationController:
             try:
                 await self.browser.goto(reg_link)
                 await asyncio.sleep(page_load_wait)
-                logger.info(f"Перешли по найденной ссылке: {reg_link} — валидируем...")
-
-                validation = await self.selector_finder.validate_registration_page(
-                    template=template,
+                logger.info(
+                    f"Перешли по найденной ссылке: {reg_link} — валидируем..."
                 )
+
+                validation = (
+                    await self.selector_finder.validate_registration_page(
+                        template=template,
+                    )
+                )
+                validation = await _handle_agree_link(validation)
 
                 if validation["is_valid"]:
                     logger.info(
                         f"✅ Найденная ссылка подтверждена: {reg_link} "
                         f"(trigger={validation['found_trigger']})"
                     )
-
-                    # Сохраняем относительный путь в шаблон
-                    if engine_name and self.template_manager:
-                        relative_path = _extract_relative_path(reg_link)
-                        try:
-                            await self.template_manager.update_template(
-                                engine_name=engine_name,
-                                new_data={
-                                    "registration_page": {"url": relative_path}
-                                },
-                            )
-                            logger.info(
-                                f"URL сохранён в шаблон: {relative_path}"
-                            )
-                        except Exception as e:
-                            logger.warning(f"Не удалось сохранить URL в шаблон: {e}")
-
+                    await _save_url_to_template(reg_link)
                     return validation["blocks"]
                 else:
                     logger.warning(
                         f"Найденная ссылка не прошла валидацию: {reg_link}"
                     )
-
             except Exception as e:
                 logger.warning(f"Не удалось перейти по ссылке {reg_link}: {e}")
+
+        # Возможно уже на странице регистрации
+        current_url = await self.page.current_url
+        if any(
+            kw in current_url.lower()
+            for kw in ["register", "signup", "регистр"]
+        ):
+            logger.info("Уже на странице регистрации (проверка URL)")
+            validation = await self.selector_finder.validate_registration_page(
+                template=template,
+            )
+            validation = await _handle_agree_link(validation)
+            if validation["is_valid"]:
+                return validation["blocks"]
 
         # === ЭТАП 3: Ручное вмешательство ===
         logger.warning(
             "Автоматический переход на страницу регистрации не удался — "
             "запрашиваем ручное открытие"
         )
-
         timeout = self.config.get("MANUAL_FIELD_FILL_TIMEOUT", 120)
         print("\n" + "=" * 60)
         print("⚠️  Не удалось автоматически перейти на страницу регистрации.")
@@ -1760,33 +1808,23 @@ class RegistrationController:
 
         try:
             await asyncio.wait_for(
-                asyncio.get_running_loop().run_in_executor(None, input, ">>> "),
+                asyncio.get_running_loop().run_in_executor(
+                    None, input, ">>> "
+                ),
                 timeout=timeout,
             )
 
-            # После ручного открытия ждём загрузку
+            # После ручного открытия ждём загрузку страницы
             await asyncio.sleep(page_load_wait)
 
             validation = await self.selector_finder.validate_registration_page(
                 template=template,
             )
+            validation = await _handle_agree_link(validation)
 
-            # Сохраняем URL ручного ввода (если engine_name задан)
-            if engine_name and self.template_manager:
-                current_url = await self.page.current_url
-                relative_path = _extract_relative_path(current_url)
-                try:
-                    await self.template_manager.update_template(
-                        engine_name=engine_name,
-                        new_data={
-                            "registration_page": {"url": relative_path}
-                        },
-                    )
-                    logger.info(
-                        f"URL из ручного выбора сохранён в шаблон: {relative_path}"
-                    )
-                except Exception as e:
-                    logger.warning(f"Не удалось сохранить URL в шаблон: {e}")
+            # Сохраняем URL ручного ввода
+            manual_url = await self.page.current_url
+            await _save_url_to_template(manual_url)
 
             # НЕ прерываем даже если validation["is_valid"] is False
             # Оператор открыл страницу — доверяем ему
@@ -1805,7 +1843,9 @@ class RegistrationController:
             return validation["blocks"]
 
         except asyncio.TimeoutError:
-            logger.warning(f"Таймаут ожидания ручного открытия формы ({timeout}с)")
+            logger.warning(
+                f"Таймаут ожидания ручного открытия формы ({timeout}с)"
+            )
             logger.warning("Навигация полностью провалилась")
             return None
         

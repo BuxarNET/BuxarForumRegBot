@@ -1394,29 +1394,52 @@ class SelectorFinder:
         template: dict | None = None,
     ) -> dict:
         """Проверяет, является ли текущая страница страницей регистрации.
-    
-        Критерий: наличие элемента согласия (agree_checkbox, register_radio)
-        или элементов из template.agree_step в DOM.
-    
+
+        Критерии (в порядке приоритета):
+        1. agree_checkbox в лучшем блоке
+        2. register_radio в лучшем блоке
+        3. submit_button с текстом регистрации
+        4. элементы из template.agree_step в DOM
+        5. ссылка <a> с текстом согласия (многоэтапная регистрация phpBB)
+
         Args:
             template: Текущий шаблон для проверки agree_step.
-    
+
         Returns:
             dict с ключами:
                 is_valid: bool — страница является страницей регистрации
                 found_trigger: str — какой триггер найден
+                agree_link_href: str | None — href ссылки согласия (если найдена)
                 blocks: list[dict] — результат analyze_current_page
         """
+        await self._ensure_common_fields()
         blocks = await self.analyze_current_page(template=template)
-    
+
+        empty_result = {
+            "is_valid": False,
+            "found_trigger": "",
+            "agree_link_href": None,
+            "blocks": blocks,
+        }
+
         if not blocks:
             logger.info("❌ Валидация: блоки не найдены")
-            return {"is_valid": False, "found_trigger": "", "blocks": []}
-    
+            # Даже без блоков проверяем ссылку согласия (Этап 5)
+            # Это критично для phpBB многоэтапной регистрации
+            agree_link_href = await self._find_agree_link()
+            if agree_link_href:
+                return {
+                    "is_valid": True,
+                    "found_trigger": "agree_link",
+                    "agree_link_href": agree_link_href,
+                    "blocks": [],
+                }
+            return empty_result
+
         best_block = blocks[0]
         form_selector = best_block.get("form_selector", "")
-    
-        # Проверка 1: agree_checkbox в блоке
+
+        # Проверка 1: agree_checkbox
         if best_block.get("agree_checkbox"):
             logger.info(
                 f"✅ Страница подтверждена (trigger=agree_checkbox, "
@@ -1425,10 +1448,11 @@ class SelectorFinder:
             return {
                 "is_valid": True,
                 "found_trigger": "agree_checkbox",
+                "agree_link_href": None,
                 "blocks": blocks,
             }
-    
-        # Проверка 2: register_radio в блоке
+
+        # Проверка 2: register_radio
         if best_block.get("register_radio"):
             logger.info(
                 f"✅ Страница подтверждена (trigger=register_radio, "
@@ -1437,10 +1461,11 @@ class SelectorFinder:
             return {
                 "is_valid": True,
                 "found_trigger": "register_radio",
+                "agree_link_href": None,
                 "blocks": blocks,
             }
-    
-        # Проверка 3: submit_button с текстом регистрации в блоке
+
+        # Проверка 3: submit_button с текстом регистрации
         submit_label = (best_block.get("submit_button_label") or "").lower()
         if submit_label:
             submit_keywords = [
@@ -1455,16 +1480,14 @@ class SelectorFinder:
                 return {
                     "is_valid": True,
                     "found_trigger": f"submit_button:{submit_label[:30]}",
+                    "agree_link_href": None,
                     "blocks": blocks,
                 }
-    
+
         # Проверка 4: элементы из template.agree_step в DOM
         if template:
             agree_step = template.get("agree_step") or {}
-            checkboxes = agree_step.get("checkboxes") or []
-            submit_buttons = agree_step.get("submit_button") or []
-    
-            for sel in checkboxes + submit_buttons:
+            for sel in (agree_step.get("checkboxes") or []) + (agree_step.get("submit_button") or []):
                 if not sel:
                     continue
                 try:
@@ -1477,17 +1500,116 @@ class SelectorFinder:
                         return {
                             "is_valid": True,
                             "found_trigger": f"template_agree_step:{sel}",
+                            "agree_link_href": None,
                             "blocks": blocks,
                         }
                 except Exception:
                     pass
-    
-        logger.info(
-            "❌ Страница не является страницей регистрации: "
-            "триггеры согласия не найдены"
-        )
-        return {"is_valid": False, "found_trigger": "", "blocks": blocks}
 
+        # Проверка 5: ссылка согласия (многоэтапная регистрация)
+        agree_link_href = await self._find_agree_link()
+        if agree_link_href:
+            return {
+                "is_valid": True,
+                "found_trigger": "agree_link",
+                "agree_link_href": agree_link_href,
+                "blocks": blocks,
+            }
+
+        logger.info("❌ Триггеры согласия не найдены")
+        return empty_result
+
+    async def _find_agree_link(self) -> str | None:
+        """Ищет ссылку <a> с текстом согласия (многоэтапная регистрация phpBB).
+
+        Использует ТОЛЬКО существующий agree_keywords из common_fields.json.
+        
+        Логика приоритетов:
+        1. Слова-действия: "соглас", "принимаю", "accept", "agree" (приоритет)
+        2. Fallback: любые другие keywords из agree_keywords
+        3. Исключение: ссылки с отрицанием ("не согласен", "disagree")
+
+        Returns:
+            Абсолютный href ссылки согласия или None.
+        """
+        await self._ensure_common_fields()
+
+        agree_keywords = [
+            k.lower() for k in self.common_fields.get("agree_keywords", [])
+        ]
+        
+        if not agree_keywords:
+            logger.debug("Ключевые слова для поиска ссылки согласия не заданы")
+            return None
+
+        # Слова-действия (приоритетный поиск) — подмножество agree_keywords
+        action_words = ["соглас", "принимаю", "accept", "agree", "принять", "подтверждаю"]
+        
+        # Отрицания для исключения (простая эвристика)
+        negation_prefixes = ["не ", "not ", "dis"]
+
+        try:
+            links_js = """
+                (function() {
+                    var links = document.querySelectorAll('a');
+                    var result = [];
+                    for (var i = 0; i < links.length; i++) {
+                        var text = (links[i].innerText || links[i].textContent || '').trim();
+                        var href = links[i].href || '';
+                        if (text && href) {
+                            result.push({text: text.toLowerCase(), href: href});
+                        }
+                    }
+                    return JSON.stringify(result);
+                })()
+            """
+            response = await self.page.execute_script(links_js)
+            links_raw = response.get("result", {}).get("result", {}).get("value", "[]")
+            links = json.loads(links_raw) if isinstance(links_raw, str) else []
+
+            # Вспомогательная функция: проверка на отрицание
+            def has_negation(text: str) -> bool:
+                """Проверяет, содержит ли текст отрицание перед keyword."""
+                for prefix in negation_prefixes:
+                    if prefix in text:
+                        return True
+                return False
+
+            # Проход 1: приоритетный поиск слов-действий
+            for link in links:
+                link_text = link.get("text", "")
+                if has_negation(link_text):
+                    continue
+                
+                # Ищем слова-действия из agree_keywords
+                for kw in agree_keywords:
+                    if kw in action_words and kw in link_text:
+                        href = link.get("href", "")
+                        logger.info(
+                            f"✅ Найдена ссылка согласия (action): "
+                            f"text='{link_text[:40]}', href='{href[:60]}'"
+                        )
+                        return href
+
+            # Проход 2: fallback на любые agree_keywords
+            for link in links:
+                link_text = link.get("text", "")
+                if has_negation(link_text):
+                    continue
+                
+                for kw in agree_keywords:
+                    if kw in link_text:
+                        href = link.get("href", "")
+                        logger.info(
+                            f"✅ Найдена ссылка согласия (fallback): "
+                            f"text='{link_text[:40]}', href='{href[:60]}'"
+                        )
+                        return href
+
+        except Exception as e:
+            logger.debug(f"Ошибка поиска ссылки согласия: {e}")
+
+        return None
 
 def _default_common_fields() -> dict:
     """Возвращает значения common_fields по умолчанию."""
