@@ -5,26 +5,61 @@
   "detect": {
     "url_pattern": "register",
     "meta_tags": [
-      {"name": "generator", "content": "vBulletin"}
+      {
+        "name": "generator",
+        "content": "vBulletin"
+      }
     ],
-    "html_contains": ["vbulletin"]
+    "html_contains": [
+      "vbulletin"
+    ]
   },
   "registration_page": {
-    "url": ["/register.php"],
-    "form_selector": ["form#register"]
+    "url": [
+      "/register.php"
+    ],
+    "form_selector": [
+      "form#register",
+      "form[action='register.php?do=register']",
+      "form[action='register.php?do=addmember']"
+    ]
   },
   "agree_step": {
-    "checkboxes": [],
+    "checkboxes": [
+      "#cb_adminemail"
+    ],
     "submit_button": []
   },
   "fields": {
-    "username": ["input[name='username']"],
-    "email": ["input[name='email']"],
-    "password": ["input[name='password']"],
-    "confirm_password": ["input[name='password_confirm']"],
-    "agree_checkbox": ["input[name='agree']"],
-    "submit_button": ["input[type='submit']"],
-    "captcha_indicator": ["div.g-recaptcha"]
+    "username": [
+      "input[name='username']",
+      "#regusername"
+    ],
+    "email": [
+      "input[name='email']"
+    ],
+    "password": [
+      "input[name='password']"
+    ],
+    "confirm_password": [
+      "input[name='password_confirm']",
+      "input[name='passwordconfirm']"
+    ],
+    "agree_checkbox": [
+      "input[name='agree']",
+      "#cb_rules_agree"
+    ],
+    "submit_button": [
+      "input[type='submit']",
+      "form[action='register.php?do=register'] input[type='submit']"
+    ],
+    "captcha_indicator": [
+      "div.g-recaptcha"
+    ],
+    "submit_button_label": [
+      "Регистрация",
+      "Регистрация завершена"
+    ]
   },
   "custom_fields": [],
   "success_indicators": [

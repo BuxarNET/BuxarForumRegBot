@@ -92,8 +92,12 @@ class CaptchaExtensionHelper:
             logger.critical(f"Нет доступных провайдеров для {captcha_type}")
             return None
 
+        skip_manual = kwargs.pop("skip_manual", False)
+
         for provider in chain:
             provider_name = provider.name
+            if skip_manual and provider_name == "manual":
+                continue
 
             # При первом использовании провайдера — сохраняем баланс
             if provider_name not in self.used_providers:

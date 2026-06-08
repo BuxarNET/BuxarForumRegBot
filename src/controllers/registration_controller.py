@@ -2916,6 +2916,7 @@ class RegistrationController:
                     captcha_type=captcha_type,
                     site_key=site_key,
                     page_url=page_url,
+                    skip_manual=True,
                 )
                 if token:
                     logger.info("Капча решена автоматически через API")

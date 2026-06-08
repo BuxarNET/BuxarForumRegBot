@@ -39,7 +39,7 @@
         "1990"
       ],
       "phone": null,
-      "website": null,
+      "website": [],
       "occupation": null,
       "interests": null,
       "about": null,
@@ -59,13 +59,17 @@
       "s": [],
       "qa_answer": [
         "alex1966"
-      ]
+      ],
+      "humanverify[input]": [
+        "дороги"
+      ],
+      "dst": []
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-08T04:58:37",
+    "last_attempt": "2026-06-08T06:52:30",
     "last_error": {
-      "reason": "browser_crash",
+      "reason": "no_form_detected",
       "proxy_used": null
     }
   },
