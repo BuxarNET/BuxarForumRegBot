@@ -892,6 +892,16 @@ class SelectorFinder:
                                 )
                         except Exception as e:
                             logger.debug(f"Не удалось получить tagName через JS: {e}")
+                try:
+                    _tab = element.get_attribute("tabindex")
+                    if _tab is not None and int(str(_tab).strip()) < 0:
+                        logger.debug(
+                            f"Пропускаем поле с tabindex={_tab} (honeypot): "
+                            f"{attrs.get('name') or attrs.get('id') or '?'}"
+                        )
+                        continue
+                except (ValueError, TypeError):
+                    pass
 
                 selector = self._generate_css_selector(element, attrs)
                 display_text = await self._get_display_text(element)
