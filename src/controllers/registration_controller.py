@@ -254,7 +254,7 @@ class RegistrationController:
                 # Если страница не загрузилась — выполняем refresh с увеличенным ожиданием.
                 # Перенесено сюда из _check_result чтобы _check_block_changed
                 # тоже получал уже загруженную страницу.
-                page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 30.0)
+                page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
                 page_reload_timeout: float = self.config.get("FIND_REGISTRATION_PAGE_TIMEOUT", 60.0)
                 min_content_length: int = self.config.get("MIN_PAGE_CONTENT_LENGTH", 300)
 
@@ -3409,7 +3409,7 @@ class RegistrationController:
                                  'header','nav','footer','aside'];
                 var SKIP_CLASSES = ['header','footer','nav','sidebar',
                                     'menu','navigation','breadcrumb'];
-
+    
                 function isPotentiallyVisible(el) {
                     if (!el.getBoundingClientRect) return true;
                     var style = window.getComputedStyle(el);
@@ -3417,11 +3417,20 @@ class RegistrationController:
                     // намеренно игнорируем: элемент может быть в процессе анимации
                     return style.display !== 'none' && style.visibility !== 'hidden';
                 }
-
+    
+                // Ослабленная проверка видимости для модальных окон:
+                // игнорируем opacity и visibility (модалка может быть в процессе анимации),
+                // проверяем только display (старые модалки обычно display:none)
+                function isModalVisible(el) {
+                    if (!el.getBoundingClientRect) return true;
+                    var style = window.getComputedStyle(el);
+                    return style.display !== 'none';
+                }
+    
                 function shouldSkip(el) {
                     var tag = el.tagName ? el.tagName.toLowerCase() : '';
                     if (SKIP_TAGS.indexOf(tag) > -1) return true;
-                    var classes = (el.className || '').toLowerCase().split(/\s+/);
+                    var classes = (el.className || '').toLowerCase().split(/\\s+/);
                     var id = (el.id || '').toLowerCase();
                     for (var i = 0; i < SKIP_CLASSES.length; i++) {
                         if (classes.indexOf(SKIP_CLASSES[i]) > -1) return true;
@@ -3429,22 +3438,33 @@ class RegistrationController:
                     }
                     return false;
                 }
-
-                function collectText(el, parts) {
+    
+                function collectText(el, parts, visibilityCheck) {
                     if (!el || el.nodeType === 8) return; // комментарии — пропускаем
                     if (el.nodeType === 3) {              // текстовый узел
                         var t = el.textContent.trim();
                         if (t) parts.push(t);
                         return;
                     }
-                    if (!isPotentiallyVisible(el)) return;
+                    if (!visibilityCheck(el)) return;
                     if (shouldSkip(el)) return;
                     for (var i = 0; i < el.childNodes.length; i++) {
-                        collectText(el.childNodes[i], parts);
+                        collectText(el.childNodes[i], parts, visibilityCheck);
                     }
                 }
-
-                // Перебираем кандидатов — берём первый давший непустой результат
+    
+                // Приоритет 1: Модальные окна (с ослабленной проверкой видимости)
+                var modalSelectors = '.modal, [role="dialog"], .popup, .overlay, .modal-window';
+                var modals = document.querySelectorAll(modalSelectors);
+                for (var i = 0; i < modals.length; i++) {
+                    var modalParts = [];
+                    collectText(modals[i], modalParts, isModalVisible);
+                    if (modalParts.length > 0) {
+                        return modalParts.join('\\n');
+                    }
+                }
+    
+                // Приоритет 2: Стандартные контейнеры (с полной проверкой видимости)
                 var rootCandidates = [
                     document.querySelector('main'),
                     document.querySelector('#content'),
@@ -3452,22 +3472,22 @@ class RegistrationController:
                     document.querySelector('article'),
                     document.body
                 ];
-
+    
                 var parts = [];
                 for (var i = 0; i < rootCandidates.length; i++) {
                     if (rootCandidates[i]) {
-                        collectText(rootCandidates[i], parts);
+                        collectText(rootCandidates[i], parts, isPotentiallyVisible);
                         if (parts.length > 0) break;
                     }
                 }
-
+    
                 // Fallback: если все фильтры дали пустой результат (NoJs, CSS-скрытие) —
                 // берём весь текст body без проверки видимости
                 if (parts.length === 0) {
                     return document.body.innerText || document.body.textContent || '';
                 }
-
-                return parts.join('\n');
+    
+                return parts.join('\\n');
             })()
         """
 

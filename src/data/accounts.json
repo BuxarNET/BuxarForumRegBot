@@ -63,7 +63,7 @@
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-04-08T02:54:03",
+    "last_attempt": "2026-06-08T04:58:37",
     "last_error": {
       "reason": "browser_crash",
       "proxy_used": null

@@ -1,33 +1,57 @@
 {
-  "name": "vBulletin",
-  "domain": "vbulletin.com",
-  "engine": "vbulletin",
+  "name": "woman.ru",
+  "domain": "woman.ru",
+  "engine": "woman.ru",
   "detect": {
-    "url_pattern": "register",
-    "meta_tags": [
-      {"name": "generator", "content": "vBulletin"}
-    ],
-    "html_contains": ["vbulletin"]
+    "url_pattern": null,
+    "html_contains": [],
+    "meta_tags": []
   },
   "registration_page": {
-    "url": ["/register.php"],
-    "form_selector": ["form#register"]
+    "url": [],
+    "form_selector": [
+        "form[action='/forum/ajax/register/']"
+    ]
   },
   "agree_step": {
     "checkboxes": [],
     "submit_button": []
   },
   "fields": {
-    "username": ["input[name='username']"],
-    "email": ["input[name='email']"],
-    "password": ["input[name='password']"],
-    "confirm_password": ["input[name='password_confirm']"],
-    "agree_checkbox": ["input[name='agree']"],
-    "submit_button": ["input[type='submit']"],
-    "captcha_indicator": ["div.g-recaptcha"]
+    "username": [
+      "input[name='name']"
+    ],
+    "email": [
+      "input[name='email']"
+    ],
+    "password": [],
+    "confirm_password": [],
+    "agree_checkbox": [
+      "input[name='rules']",
+      "input[name='agreement']"
+    ],
+    "submit_button": [
+      "form[action='/forum/ajax/register/'] button[type='submit']"
+    ],
+    "captcha_indicator": [],
+    "username_label": [
+      "Никнейм"
+    ],
+    "email_label": [
+      "Email"
+    ],
+    "submit_button_label": [
+      "Зарегистрироваться"
+    ]
   },
   "custom_fields": [],
   "success_indicators": [
+    "registration complete",
+    "your account has been created",
+    "account created",
+    "check your email",
+    "activation link",
+    "confirmation email",
     "активировать",
     "активации",
     "письмо",
@@ -40,22 +64,19 @@
     "вам выслано письмо",
     "активационная ссылка",
     "завершена регистрация",
-    "registration complete",
-    "account created",
-    "check your email",
     "verify your email",
     "welcome",
-    "thank you for registering",
-    "activation link",
-    "confirmation email"
+    "thank you for registering"
   ],
   "error_indicators": [
+    "username already exists",
+    "email address is already registered",
+    "already taken",
+    "already exists",
     "уже зарегистрирован",
     "занято",
     "ошибка",
     "already registered",
-    "already exists",
-    "already taken",
     "username taken",
     "email already",
     "invalid username",
