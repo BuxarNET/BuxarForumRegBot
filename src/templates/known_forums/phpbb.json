@@ -26,7 +26,8 @@
       ],
       [
         "#register"
-      ]
+      ],
+      "#agreement"
     ]
   },
   "agree_step": {
@@ -87,6 +88,13 @@
     ],
     "confirm_email_label": [
       "Подтвердите email:"
+    ],
+    "submit_button_label": [
+      "Я соглашаюсь с этими условиями",
+      "Отправить"
+    ],
+    "pf_family": [
+      "#pf_family"
     ]
   },
   "custom_fields": [],
@@ -98,8 +106,6 @@
     "activation link",
     "confirmation email",
     "активировать",
-    "активации",
-    "письмо",
     "подтвердите регистрацию",
     "спасибо за регистрацию",
     "регистрация завершена",

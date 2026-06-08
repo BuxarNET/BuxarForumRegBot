@@ -1130,10 +1130,15 @@ class SelectorFinder:
 
                 matched_type = None
                 for type_name, keywords in known_field_types:
-                    if any(kw.lower() in combined for kw in keywords):
-                        matched_type = type_name
-                        break
-
+                    for kw in keywords:
+                        # \b означает границу слова. re.escape защищает от спецсимволов.
+                        pattern = rf'\b{re.escape(kw)}\b'
+                        if re.search(pattern, combined, re.IGNORECASE):
+                            matched_type = type_name
+                            break  # Прерываем внутренний цикл по ключевым словам
+                    if matched_type:
+                        break  # Прерываем внешний цикл, если тип уже найден
+            
                 # Неизвестные поля — в custom_fields
                 field_label = (
                     matched_type

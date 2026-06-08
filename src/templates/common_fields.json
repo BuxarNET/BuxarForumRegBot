@@ -49,6 +49,10 @@
   "dob_year_keywords": [
     "year", "год"
   ],
+  "register_radio_keywords": [
+    "register", "sign up", "зарегистрироваться", "регистрация",
+    "нет, зарегистрироваться", "create account", "новый пользователь"
+  ],
   "gender_keywords": [
     "gender", "sex", "пол"
   ],
@@ -56,7 +60,7 @@
     "first", "firstname", "fname", "first_name", "имя", "name"
   ],
   "lastname_keywords": [
-    "last", "lastname", "lname", "фамилия", "surname", "last_name", "family"
+    "last", "lastname", "lname", "фамилия", "surname", "last_name"
   ],
   "phone_keywords": [
     "phone", "tel", "mobile", "cellular", "телефон", "мобильный", "номер"
@@ -82,11 +86,8 @@
   ],
   "one_time_field_keywords": [
     "captcha", "imagestring", "image_string", "seccode",
-    "answer", "question", "secret", "код", "code", "q_and_a"
-  ],
-  "register_radio_keywords": [
-    "register", "sign up", "зарегистрироваться", "регистрация",
-    "нет, зарегистрироваться", "create account", "новый пользователь"
+    "answer", "question", "secret", "код", "code", "q_and_a", "humanverify",
+    "balls", "phpbb_balls", "очистите", "спам", "анти-спам", "antispam"
   ],
   "honeypot_keywords": [
     "оставьте это поле пустым",
