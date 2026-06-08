@@ -611,11 +611,25 @@ class SelectorFinder:
         return scored_blocks
     
     async def _get_display_text(self, element) -> str:
-        """Возвращает видимый текст элемента."""
+        """Возвращает видимый текст элемента.
+
+        Универсальный механизм для всех типов полей:
+        - Кнопки (submit/button) — value или innerText
+        - Поля с id — label[for="id"]
+        - Все типы полей (текстовые, radio, checkbox, select) —
+          fallback через структуру формы (td, dl, tr, div)
+        - Placeholder — последний резерв
+
+        Гарантированно возвращает str (никогда None).
+        Все JS-вызовы используют json.dumps для безопасной подстановки.
+        """
         try:
+            # Определяем атрибуты один раз
             el_id = element.get_attribute("id") or ""
+            el_name = element.get_attribute("name") or ""
             el_type = (element.get_attribute("type") or "").lower()
-            # 🔧 ИСПРАВЛЕНИЕ: надёжное определение tagName
+
+            # Надёжное определение tagName
             tag = element.get_attribute("tagName")
             if not tag:
                 el_value = element.get_attribute("value")
@@ -623,16 +637,15 @@ class SelectorFinder:
                     tag = "button"
                 else:
                     tag = "input"
-            tag = tag.lower()
+            tag = tag.lower() if tag else "input"
 
-            # Для кнопок — value или innerText
+            # ── 1. Кнопки (submit/button) — value или innerText ──────────────
             if el_type == "submit" or tag == "button":
                 value = (element.get_attribute("value") or "").strip()
                 if value:
-                    return value
+                    return value[:80]
 
-                # Приоритет 1: JS напрямую на объекте элемента (this = нужная кнопка)
-                # Это основной и самый надёжный способ для модальных окон и сложных форм
+                # Приоритет 1: JS на объекте элемента
                 try:
                     response = await element.execute_script(
                         'return this.innerText?.trim() || this.textContent?.trim() || ""',
@@ -640,12 +653,11 @@ class SelectorFinder:
                     )
                     text = response.get("result", {}).get("result", {}).get("value", "") or ""
                     if text:
-                        logger.debug(f"Текст кнопки получен через element.execute_script: '{text}'")
-                        return text
-                except Exception as e:
-                    logger.debug(f"element.execute_script не сработал для кнопки: {e}")
+                        return text[:80]
+                except Exception:
+                    pass
 
-                # Приоритет 2: fallback через глобальный querySelector (последний резерв)
+                # Приоритет 2: глобальный querySelector
                 try:
                     btn_selector = f"#{el_id}" if el_id else self._generate_css_selector(element)
                     js_sel = json.dumps(btn_selector)
@@ -654,28 +666,103 @@ class SelectorFinder:
                     )
                     text = response.get("result", {}).get("result", {}).get("value", "") or ""
                     if text:
-                        return text
-                except Exception as e:
-                    logger.debug(f"Не удалось получить innerText кнопки через глобальный JS: {e}")
-
-                return ""
-
-            # Для полей и чекбоксов — label[for="id"]
-            if el_id:
-                try:
-                    response = await self.page.execute_script(
-                        f"return document.querySelector('label[for=\"{el_id}\"]')?.innerText?.trim() || ''"
-                    )
-                    text = response.get("result", {}).get("result", {}).get("value", "")
-                    if text:
-                        return text
+                        return text[:80]
                 except Exception:
                     pass
 
-            # Fallback — placeholder или name
+                return ""
+
+            # ── 2. Поля с id — label[for="id"] (безопасно через json.dumps) ──
+            if el_id and el_type not in ("radio", "checkbox"):
+                try:
+                    js_id = json.dumps(el_id)
+                    response = await self.page.execute_script(
+                        f"return document.querySelector('label[for=' + {js_id} + ']')?.innerText?.trim() || ''"
+                    )
+                    text = response.get("result", {}).get("result", {}).get("value", "") or ""
+                    if text:
+                        return text[:80]
+                except Exception:
+                    pass
+
+            # ── 3. Универсальный fallback — структура формы ──────────────────
+            # Работает для всех типов: текстовые, radio, checkbox, select
+            # Покрывает phpBB (td), XenForo (dl), современные формы (div.field)
+            if el_type not in ("hidden", "submit", "button", "image", "reset"):
+                try:
+                    # Безопасный селектор: id или [name="..."] с CSS.escape внутри JS
+                    if el_id:
+                        js_selector_expr = json.dumps(f"#{el_id}")
+                    elif el_name:
+                        js_name = json.dumps(el_name)
+                        js_selector_expr = f"'[name=' + CSS.escape({js_name}) + ']'"
+                    else:
+                        js_selector_expr = None
+
+                    if js_selector_expr:
+                        response = await self.page.execute_script(
+                            f"""
+                            (function() {{
+                                var sel = {js_selector_expr};
+                                var el = document.querySelector(sel);
+                                if (!el) return '';
+
+                                // Стратегия 1: предыдущая ячейка в таблице (phpBB, Sibmama)
+                                var td = el.closest('td');
+                                if (td) {{
+                                    var prev = td.previousElementSibling;
+                                    if (prev && (prev.tagName === 'TD' || prev.tagName === 'TH')) {{
+                                        var t = prev.innerText?.trim();
+                                        if (t && t.length > 1) return t;
+                                    }}
+                                }}
+
+                                // Стратегия 2: dt в dl (XenForo, definition list)
+                                var dl = el.closest('dl');
+                                if (dl) {{
+                                    var dt = dl.querySelector('dt');
+                                    if (dt) {{
+                                        var t = dt.innerText?.trim();
+                                        if (t && t.length > 1) return t;
+                                    }}
+                                }}
+
+                                // Стратегия 3: label/span в div.field / li / fieldset
+                                var container = el.closest('fieldset, li, div.field, div.form-group');
+                                if (container) {{
+                                    var title = container.querySelector('label, legend, dt, .field-label, .question');
+                                    if (title) {{
+                                        var t = title.innerText?.trim();
+                                        if (t && t.length > 1) return t;
+                                    }}
+                                }}
+
+                                // Стратегия 4: первый span/label в той же строке tr
+                                var tr = el.closest('tr');
+                                if (tr) {{
+                                    var firstLabel = tr.querySelector('span.gen, span.gensmall, span, label, b, strong');
+                                    if (firstLabel) {{
+                                        var t = firstLabel.innerText?.trim();
+                                        // Убираем звёздочки обязательных полей
+                                        t = t.replace(/[*:]+$/g, '').trim();
+                                        if (t && t.length > 1) return t;
+                                    }}
+                                }}
+
+                                return '';
+                            }})()
+                            """
+                        )
+                        text = response.get("result", {}).get("result", {}).get("value", "") or ""
+                        if text:
+                            return text[:80]
+                except Exception:
+                    pass
+
+            # ── 4. Placeholder — последний резерв ────────────────────────────
             placeholder = (element.get_attribute("placeholder") or "").strip()
             if placeholder:
-                return placeholder
+                return placeholder[:80]
 
             return ""
 

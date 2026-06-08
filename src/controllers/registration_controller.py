@@ -2200,12 +2200,27 @@ class RegistrationController:
                     f"Не удалось заполнить поле '{field_name}' автоматически — "
                     f"запрашиваем ручной ввод"
                 )
+                _sel_for_hint = selector if isinstance(selector, str) else selectors_list[0] if selectors_list else ""
+                _current_value = ""
+                if _sel_for_hint:
+                    try:
+                        _el_hint = await self._query_in_context(_sel_for_hint, form_el=_form_el)
+                        if _el_hint:
+                            _current_value = (
+                                _el_hint.get_attribute("value")
+                                or _el_hint.get_attribute("placeholder")
+                                or ""
+                            )
+                    except Exception:
+                        pass
+
                 manual_value = await self._ask_manual_input(
                     field_name=field_name,
-                    selector_hint=selector if isinstance(selector, str) else selectors_list[0] if selectors_list else "",
+                    selector_hint=_sel_for_hint,
                     hint=f"Введите значение для поля '{field_name}'",
                     display_text=selectors.get(f"{field_name}_label", ""),
                     options=last_select_options if last_select_options else None,
+                    current_value=_current_value,
                 )
                 if manual_value:
                     for sel in selectors_list:
@@ -2311,12 +2326,25 @@ class RegistrationController:
                         f"Все варианты профиля не подошли для '{field_name}' — "
                         f"запрашиваем ручной ввод"
                     )
+                    _current_value_cf = ""
+                    try:
+                        _el_cf = await self._query_in_context(sel, form_el=_form_el)
+                        if _el_cf:
+                            _current_value_cf = (
+                                _el_cf.get_attribute("value")
+                                or _el_cf.get_attribute("placeholder")
+                                or ""
+                            )
+                    except Exception:
+                        pass
+
                     manual_value = await self._ask_manual_input(
                         field_name=field_name,
                         selector_hint=sel,
                         hint=f"Выберите значение для поля '{field_name}'",
                         display_text=custom_field.get("display_text", ""),
                         options=select_options if select_options else None,
+                        current_value=_current_value_cf,
                     )
                     if manual_value:
                         raw2 = await self._try_fill_element(sel, manual_value, field_name, form_el=_form_el)
@@ -2352,11 +2380,24 @@ class RegistrationController:
                 logger.warning(
                     f"Значение для '{field_name}' не найдено — запрашиваем ручной ввод"
                 )
+                _current_value_cf2 = ""
+                try:
+                    _el_cf2 = await self._query_in_context(sel, form_el=_form_el)
+                    if _el_cf2:
+                        _current_value_cf2 = (
+                            _el_cf2.get_attribute("value")
+                            or _el_cf2.get_attribute("placeholder")
+                            or ""
+                        )
+                except Exception:
+                    pass
+
                 manual_value = await self._ask_manual_input(
                     field_name=field_name,
                     selector_hint=sel,
                     hint=f"Введите значение для поля '{field_name}'",
                     display_text=custom_field.get("display_text", ""),
+                    current_value=_current_value_cf2,
                 )
                 if manual_value:
                     result = await self._try_fill_element(sel, manual_value, field_name, form_el=_form_el)
@@ -2993,6 +3034,7 @@ class RegistrationController:
         hint: str,
         display_text: str = "",
         options: list[str] | None = None,
+        current_value: str = "",
     ) -> str:
         """Запрашивает ручной ввод значения поля в консоли.
 
@@ -3016,6 +3058,8 @@ class RegistrationController:
         else:
             print(f"Поле:     {field_name} ({selector_hint})")
         print(f"Задание:  {hint}")
+        if current_value:
+            print(f"Текущее значение: «{current_value}»")
         if options is None:
             pass  # обычное текстовое поле — варианты не нужны
         elif options:
