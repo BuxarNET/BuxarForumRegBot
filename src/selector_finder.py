@@ -728,13 +728,67 @@ class SelectorFinder:
 
                     if js_selector_expr:
                         response = await self.page.execute_script(
-                            f"""
+                             f"""
                             (function() {{
                                 var sel = {js_selector_expr};
                                 var el = document.querySelector(sel);
                                 if (!el) return '';
-
+    
+                                // 🔥 Стратегия 0: inline-лейбл внутри родительского контейнера
+                                // Собираем текст, который находится строго до нашего элемента в том же parentNode.
+                                // Это критично для полей, где label и input находятся в одной ячейке/блоке (например, phpBB моды).
+                                // Используется TreeWalker для обхода всех узлов до целевого элемента.
+                                var container = el.closest('td, div.field, fieldset, li, div.form-group, div.gen, p');
+                                if (container) {{
+                                    var textBefore = '';
+                                    var walker = document.createTreeWalker(
+                                        container, 
+                                        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, 
+                                        null, 
+                                        false
+                                    );
+                                    var node;
+                                    while (node = walker.nextNode()) {{
+                                        // Останавливаемся, когда дошли до нашего элемента
+                                        if (node === el) break;
+                                        
+                                        if (node.nodeType === 1) {{ // Element
+                                            var tag = node.tagName;
+                                            // Сброс при встрече другого поля ввода — текст ДО него относился к другому полю
+                                            if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') {{
+                                                textBefore = '';
+                                                continue;
+                                            }}
+                                            // Пропускаем служебные теги, которые не содержат видимого текста
+                                            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'BR' || tag === 'NOSCRIPT') continue;
+                                            
+                                            // Проверяем, нет ли внутри элемента других полей ввода
+                                            // Если есть — это контейнер для другого поля, а не чистый лейбл
+                                            if (node.querySelector && node.querySelector('input, select, textarea')) {{
+                                                continue; // Пропускаем — внутри есть поле, это не чистый лейбл
+                                            }}
+                                            
+                                            textBefore += (node.innerText || node.textContent || '');
+                                            
+                                        }} else if (node.nodeType === 3) {{ // Text node
+                                            textBefore += (node.textContent || '');
+                                        }}
+                                    }}
+                                    
+                                    // Очистка: убираем звёздочки, двоеточия, лишние пробелы
+                                    textBefore = textBefore
+                                        .replace(/[*:]+$/g, '')      // Убираем trailing * и :
+                                        .replace(/^\\s+|\\s+$/g, '')    // Trim
+                                        .replace(/\\s+/g, ' ');        // Схлопываем пробелы
+                                    
+                                    // Возвращаем только если нашли осмысленный текст (от 2 до 80 символов)
+                                    if (textBefore && textBefore.length > 1 && textBefore.length < 80) {{
+                                        return textBefore;
+                                    }}
+                                }}
+    
                                 // Стратегия 1: предыдущая ячейка в таблице (phpBB, Sibmama)
+                                // Срабатывает ТОЛЬКО если Стратегия 0 не нашла inline-лейбл
                                 var td = el.closest('td');
                                 if (td) {{
                                     var prev = td.previousElementSibling;
@@ -743,7 +797,7 @@ class SelectorFinder:
                                         if (t && t.length > 1) return t;
                                     }}
                                 }}
-
+    
                                 // Стратегия 2: dt в dl (XenForo, definition list)
                                 var dl = el.closest('dl');
                                 if (dl) {{
@@ -753,17 +807,17 @@ class SelectorFinder:
                                         if (t && t.length > 1) return t;
                                     }}
                                 }}
-
+    
                                 // Стратегия 3: label/span в div.field / li / fieldset
-                                var container = el.closest('fieldset, li, div.field, div.form-group');
-                                if (container) {{
-                                    var title = container.querySelector('label, legend, dt, .field-label, .question');
+                                var container3 = el.closest('fieldset, li, div.field, div.form-group');
+                                if (container3) {{
+                                    var title = container3.querySelector('label, legend, dt, .field-label, .question');
                                     if (title) {{
                                         var t = title.innerText?.trim();
                                         if (t && t.length > 1) return t;
                                     }}
                                 }}
-
+    
                                 // Стратегия 4: первый span/label в той же строке tr
                                 var tr = el.closest('tr');
                                 if (tr) {{
@@ -775,7 +829,7 @@ class SelectorFinder:
                                         if (t && t.length > 1) return t;
                                     }}
                                 }}
-
+    
                                 return '';
                             }})()
                             """
