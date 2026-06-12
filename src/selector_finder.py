@@ -1078,14 +1078,38 @@ class SelectorFinder:
                 # авто-заполнения (OptOut, AutoTimeZone и др. из skip_field_classes)
                 try:
                     sf_response: dict = await self.page.execute_script(
-                        f"var el=document.querySelector({json.dumps(selector)});"
-                        f"if(!el)return null;"
-                        f"var p=el.closest('dl,div,li,td');"
-                        f"return JSON.stringify({{"
-                        f"parentStyle:p?p.getAttribute('style')||'':'',"
-                        f"parentClass:p?p.className||'':'',"
-                        f"elementClass:el.className||''"
-                        f"}});"
+                        f"""
+                        var el = document.querySelector({json.dumps(selector)});
+                        if (!el) return null;
+                    
+                        // 1. Проверка ВСЕХ родителей на display:none / visibility:hidden
+                        // Исправляет баг: closest() останавливался на <td> внутри <tr style="display:none">
+                        var p = el.parentElement;
+                        var parentDisplay = '';
+                        var parentVisibility = '';
+                        while (p && p.tagName !== 'BODY') {{
+                            var cs = window.getComputedStyle(p);
+                            if (cs.display === 'none') {{ parentDisplay = 'none'; break; }}
+                            if (cs.visibility === 'hidden') {{ parentVisibility = 'hidden'; break; }}
+                            p = p.parentElement;
+                        }}
+                    
+                        // 2. Сбор классов ближайшего контейнера (XenForo skip_field_classes)
+                        var container = el.closest('dl,div,li,td,tr,form,section,article');
+                        var parentClass = container ? (container.className || '') : '';
+                    
+                        // 3. Собственные стили элемента
+                        var elStyle = window.getComputedStyle(el);
+                    
+                        return JSON.stringify({{
+                            parentDisplay: parentDisplay,
+                            parentVisibility: parentVisibility,
+                            elDisplay: elStyle.display,
+                            elVisibility: elStyle.visibility,
+                            parentClass: parentClass,
+                            elementClass: el.className || ''
+                        }});
+                        """
                     )
                     sf_raw: str | None = sf_response.get("result", {}).get("result", {}).get("value")
                     if sf_raw:
@@ -1094,7 +1118,10 @@ class SelectorFinder:
                         except (json.JSONDecodeError, TypeError):
                             sf_data = None
                         if sf_data is not None:
-                            parent_style: str = re.sub(r'\s+', '', (sf_data.get("parentStyle") or "").lower())
+                            parent_display: str = (sf_data.get("parentDisplay") or "").lower().strip()
+                            parent_visibility: str = (sf_data.get("parentVisibility") or "").lower().strip()
+                            el_display: str = (sf_data.get("elDisplay") or "").lower().strip()
+                            el_visibility: str = (sf_data.get("elVisibility") or "").lower().strip()
                             parent_class: str = (sf_data.get("parentClass") or "").lower()
                             element_class: str = (sf_data.get("elementClass") or "").lower()
                             parent_classes_set: set[str] = set(parent_class.split())
@@ -1103,8 +1130,35 @@ class SelectorFinder:
                                 parent_classes_set & skip_field_classes_set
                                 or element_classes_set & skip_field_classes_set
                             )
-                            if "display:none" in parent_style or has_skip_class:
-                                logger.debug(f"Пропускаем скрытое/авто поле: {selector}")
+    
+                            # Проверка видимости через computed style (getComputedStyle):
+                            # покрывает inline-стили, CSS-классы, скрытие через родителя
+                            is_hidden: bool = (
+                                parent_display == "none"
+                                or parent_visibility == "hidden"
+                                or el_display == "none"
+                                or el_visibility == "hidden"
+                                or has_skip_class
+                            )
+    
+                            if is_hidden:
+                                # Детальное логирование причины для отладки на разных форумах
+                                hide_reasons: list[str] = []
+                                if parent_display == "none":
+                                    hide_reasons.append("parent_display_none")
+                                if parent_visibility == "hidden":
+                                    hide_reasons.append("parent_visibility_hidden")
+                                if el_display == "none":
+                                    hide_reasons.append("el_display_none")
+                                if el_visibility == "hidden":
+                                    hide_reasons.append("el_visibility_hidden")
+                                if has_skip_class:
+                                    hide_reasons.append("skip_class")
+    
+                                logger.debug(
+                                    f"Пропускаем скрытое/авто поле: {selector} "
+                                    f"(причины: {', '.join(hide_reasons)})"
+                                )
                                 continue
                 except Exception as e:
                     logger.debug(f"Ошибка проверки skip_field для '{selector}': {e}")
