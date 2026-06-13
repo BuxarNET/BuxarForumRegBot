@@ -35,14 +35,18 @@
   },
   "agree_step": {
     "checkboxes": [
-      "input[name='agreed']"
+      "input[name='agreed']",
+      "input[name='notifypm']",
+      "input[name='pstatus_notify']",
+      "input[name='friend_notify']"
     ],
     "submit_button": []
   },
   "fields": {
     "username": [
       "input[name='username']",
-      "#username"
+      "#username",
+      "#ufnid"
     ],
     "email": [
       "input[name='email']",
@@ -79,7 +83,8 @@
       "#timezone_copy"
     ],
     "username_label": [
-      "Имя пользователя:"
+      "Имя пользователя:",
+      "ИMЯ:*\nПсевдоним для общения, длиной от 3 до 25 символов"
     ],
     "email_label": [
       "Адрес email:"
@@ -137,7 +142,8 @@
     "завершена регистрация",
     "verify your email",
     "welcome",
-    "thank you for registering"
+    "thank you for registering",
+    "учётная запись была создана"
   ],
   "error_indicators": [
     "username already exists",

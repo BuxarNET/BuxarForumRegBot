@@ -3692,7 +3692,6 @@ class RegistrationController:
                 for (var i = 0; i < rootCandidates.length; i++) {
                     if (rootCandidates[i]) {
                         collectText(rootCandidates[i], parts, isPotentiallyVisible);
-                        if (parts.length > 0) break;
                     }
                 }
     
