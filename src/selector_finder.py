@@ -23,8 +23,10 @@ CAPTCHA_SELECTORS = [
     'iframe[src*="recaptcha"]',
     'iframe[src*="hcaptcha"]',
     'iframe[src*="turnstile"]',
+    'iframe[src*="smartcaptcha"]', 
     '.g-recaptcha',
     '.h-captcha',
+    '.smart-captcha',               
     '#captcha',
 ]
 
@@ -1442,11 +1444,14 @@ class SelectorFinder:
             "turnstile":            "turnstile",
             "cf-turnstile":         "turnstile",
             "cloudflare-turnstile": "turnstile",
+            "smartcaptcha":          "yandex_smartcaptcha",
+            "yandex":                "yandex_smartcaptcha",
         }
         CONTAINER_MAP: dict[str, str] = {
             "recaptcha_v2": ".g-recaptcha",
             "hcaptcha":     ".h-captcha",
             "turnstile":    ".cf-turnstile",
+            "yandex_smartcaptcha": ".smart-captcha",
         }
 
         found: list[CaptchaInfo] = []
