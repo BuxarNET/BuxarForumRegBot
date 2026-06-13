@@ -76,10 +76,10 @@
   ],
   "skip_form_action_keywords": [
     "login", "signin", "sign-in", "logon", "войти",
-    "search", "поиск", "find", "query", "cart", "checkout"
+    "search", "поиск", "find", "query", "cart", "checkout", "sendpassword", "lostpassword", "forgot"
   ],
   "skip_form_name_keywords": [
-    "login", "search", "logon", "signin", "cart"
+    "login", "search", "logon", "signin", "cart", "sendpassword", "lostpassword", "forgot"
   ],
   "timezone_keywords": [
     "timezone", "time_zone", "ctl_tzselect", "часовой пояс", "часовой", "пояс", "utc", "gmt"

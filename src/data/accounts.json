@@ -14,7 +14,8 @@
         "Россия"
       ],
       "timezone": [
-        "Москва"
+        "Москва",
+        "3"
       ],
       "gender": [
         "Мужской",
@@ -40,7 +41,7 @@
         "1990"
       ],
       "phone": null,
-      "website": [],
+      "website": ["https://intfaq.ru/"],
       "occupation": null,
       "interests": null,
       "about": null,
@@ -51,7 +52,7 @@
         "3"
       ],
       "lang": [
-        "1"
+        "ru"
       ],
       "tz_date": [
         "1"
@@ -59,7 +60,8 @@
       "pf_profile_fio": [],
       "s": [],
       "qa_answer": [
-        "alex1966"
+        "alex1966",
+        "8115"
       ],
       "humanverify[input]": [
         "дороги"
@@ -90,11 +92,18 @@
         "1"
       ],
       "hideonline": [],
-      "popup_pm": []
+      "popup_pm": [],
+      "emailconfirm": [
+        "buxarnet@gmail.com"
+      ],
+      "referrername": [],
+      "confirm_code": [
+        "1TQIA"
+      ]
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-08T14:44:06",
+    "last_attempt": "2026-06-13T04:30:52",
     "last_error": {
       "reason": "browser_crash",
       "proxy_used": null

@@ -80,14 +80,16 @@
       "#tz_date"
     ],
     "timezone": [
-      "#timezone_copy"
+      "#timezone_copy",
+      "#tz_date"
     ],
     "username_label": [
       "Имя пользователя:",
       "ИMЯ:*\nПсевдоним для общения, длиной от 3 до 25 символов"
     ],
     "email_label": [
-      "Адрес email:"
+      "Адрес email:",
+      "Адрес e-mail:"
     ],
     "password_label": [
       "Пароль:"

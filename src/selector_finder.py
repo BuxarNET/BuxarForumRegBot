@@ -321,18 +321,18 @@ class SelectorFinder:
                 name = attrs.get("name", "")
                 form_id = attrs.get("id", "")
                 selector = self._generate_css_selector(form)
-
+                
                 # Штраф за форму логина по action/name/id (не исключаем жёстко —
                 # форум с объединённой формой логина/регистрации должен остаться кандидатом)
                 login_form_penalty = False
                 if self._keyword_match(action, skip_action_kw):
-                    logger.debug(f"[{selector}] Штраф -20 по action='{action}'")
+                    logger.debug(f"[{selector}] Штраф -50 по action='{action}'")
                     login_form_penalty = True
                 elif self._keyword_match(name, skip_name_kw):
-                    logger.debug(f"[{selector}] Штраф -20 по name='{name}'")
+                    logger.debug(f"[{selector}] Штраф -50 по name='{name}'")
                     login_form_penalty = True
                 elif self._keyword_match(form_id, skip_name_kw):
-                    logger.debug(f"[{selector}] Штраф -20 по id='{form_id}'")
+                    logger.debug(f"[{selector}] Штраф -50 по id='{form_id}'")
                     login_form_penalty = True
 
                 candidates.append({
@@ -490,8 +490,8 @@ class SelectorFinder:
 
                 # Штраф за атрибуты формы логина (флаг из Патча 1)
                 if cand.get("login_form_penalty"):
-                    score -= 20
-                    score_details.append("login_form_penalty(-20)")
+                    score -= 30
+                    score_details.append("login_form_penalty(-30)")
 
                 # Дополнительный штраф если атрибуты формы совпадают со skip_kw
                 # (страховка для div-блоков у которых нет флага из Патча 1)
