@@ -5,6 +5,7 @@
     "password": "name='USER_BUXARNET'",
     "proxy_id": null,
     "custom_fields": {
+      "nameP[0]": [],
       "referral": null,
       "city": [
         "Псков"

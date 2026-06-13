@@ -735,9 +735,8 @@ class SelectorFinder:
                                 if (!el) return '';
     
                                 // 🔥 Стратегия 0: inline-лейбл внутри родительского контейнера
-                                // Собираем текст, который находится строго до нашего элемента в том же parentNode.
-                                // Это критично для полей, где label и input находятся в одной ячейке/блоке (например, phpBB моды).
-                                // Используется TreeWalker для обхода всех узлов до целевого элемента.
+                                // Собираем текст, который находится строго до нашего элемента.
+                                // Критично для полей, где label и input находятся в одной ячейке/блоке.
                                 var container = el.closest('td, div.field, fieldset, li, div.form-group, div.gen, p');
                                 if (container) {{
                                     var textBefore = '';
@@ -748,22 +747,21 @@ class SelectorFinder:
                                         false
                                     );
                                     var node;
-                                    while (node = walker.nextNode()) {{
-                                        // Останавливаемся, когда дошли до нашего элемента
+                                    // Улучшенная проверка: явное сравнение с null для избежания warning линтеров
+                                    while ((node = walker.nextNode()) !== null) {{
                                         if (node === el) break;
                                         
                                         if (node.nodeType === 1) {{ // Element
                                             var tag = node.tagName;
-                                            // Сброс при встрече другого поля ввода — текст ДО него относился к другому полю
+                                            // Сброс при встрече другого поля ввода — текст ДО него не наш
                                             if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') {{
                                                 textBefore = '';
                                                 continue;
                                             }}
-                                            // Пропускаем служебные теги, которые не содержат видимого текста
+                                            // Пропускаем служебные теги
                                             if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'BR' || tag === 'NOSCRIPT') continue;
                                             
                                             // Проверяем, нет ли внутри элемента других полей ввода
-                                            // Если есть — это контейнер для другого поля, а не чистый лейбл
                                             if (node.querySelector && node.querySelector('input, select, textarea')) {{
                                                 continue; // Пропускаем — внутри есть поле, это не чистый лейбл
                                             }}
@@ -777,11 +775,10 @@ class SelectorFinder:
                                     
                                     // Очистка: убираем звёздочки, двоеточия, лишние пробелы
                                     textBefore = textBefore
-                                        .replace(/[*:]+$/g, '')      // Убираем trailing * и :
-                                        .replace(/^\\s+|\\s+$/g, '')    // Trim
-                                        .replace(/\\s+/g, ' ');        // Схлопываем пробелы
+                                        .replace(/[*:]+$/g, '')
+                                        .replace(/^\\s+|\\s+$/g, '')
+                                        .replace(/\\s+/g, ' ');
                                     
-                                    // Возвращаем только если нашли осмысленный текст (от 2 до 80 символов)
                                     if (textBefore && textBefore.length > 1 && textBefore.length < 80) {{
                                         return textBefore;
                                     }}
@@ -1363,6 +1360,24 @@ class SelectorFinder:
                         if display_text:
                             result["confirm_email_label"] = display_text
                         logger.debug(f"Определён confirm_email (второй): {selector} | '{display_text}'")
+                    continue
+                
+                # 🔥 ГЛОБАЛЬНАЯ ЗАЩИТА: Динамические виджеты (phpBB birthday mod, smiles и аналоги)
+                # Используем строгие регулярные выражения для имен полей, чтобы исключить 
+                # любые ложные срабатывания на легитимных полях (username, email и т.д.).
+                WIDGET_NAME_PATTERNS = [
+                    r'^namep\[\d+\]$',      # phpBB birthday: nameP[0]
+                    r'^datep\[\d+\]$',      # phpBB birthday: dateP[0]
+                    r'^iconc\[\d+\]$',      # phpBB birthday: iconC[0]
+                    r'^inm\d+$',            # Sibmama: inm0
+                    r'^f_date_c\d+$',       # Sibmama: f_date_c0
+                    r'^show_c\d+$',         # Sibmama: show_c0
+                    r'^fsh\[\d+\]$',        # phpBB smiles: fsh[0]
+                ]
+                is_widget = any(re.match(p, name, re.I) for p in WIDGET_NAME_PATTERNS)
+                
+                if is_widget:
+                    logger.debug(f"Пропущено поле виджета (не основное): {selector} (name='{name}')")
                     continue
 
                 # Username поля
