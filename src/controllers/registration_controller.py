@@ -242,7 +242,14 @@ class RegistrationController:
                 block_snapshot = self._make_block_snapshot(selectors)
 
                 # Заполняем поля
-                fill_result = await self._fill_fields(selectors, account_data, template, engine_name, form_selector)
+                fill_result = await self._fill_fields(
+                    selectors,
+                    account_data,
+                    template,
+                    engine_name,
+                    form_selector=form_selector,
+                    form_element=current_block.get("form_element"),
+                )
                 username_was_filled = username_was_filled or ("username" in fill_result["filled"])
                 filled_fields = fill_result["filled"]
 
@@ -1856,6 +1863,7 @@ class RegistrationController:
         template: dict | None = None,
         engine_name: str | None = None,
         form_selector: str | None = None,
+        form_element: object | None = None,
     ) -> FillFieldsResult:
         """Заполняет поля формы регистрации.
 
@@ -1872,6 +1880,8 @@ class RegistrationController:
             template: Текущий шаблон (только для чтения — не обновляется внутри метода).
             engine_name: Название движка (передаётся в аккумуляторы для контекста).
             form_selector: Селектор формы (для передачи в _handle_submit).
+            form_element: Объект формы Pydoll из блока — используется как приоритетный
+                контекст поиска вместо повторного page.query(form_selector).
 
         Returns:
             FillFieldsResult со следующими полями:
@@ -1915,8 +1925,11 @@ class RegistrationController:
         }
         
         # Кэшируем элемент формы для контекстного поиска во всех шагах
-        _form_el = None
-        if form_selector:
+        # Приоритет: объект из блока (уже проверенный) > строковый селектор
+        _form_el = form_element
+        if _form_el is not None:
+            logger.debug("Используем form_element из блока (проверенный объект)")
+        elif form_selector:
             try:
                 _form_el = await self.page.query(form_selector, timeout=3, raise_exc=False)
                 if _form_el:
