@@ -41,7 +41,9 @@
         "1990"
       ],
       "phone": null,
-      "website": ["https://intfaq.ru/"],
+      "website": [
+        "https://intfaq.ru/"
+      ],
       "occupation": null,
       "interests": null,
       "about": null,
@@ -103,9 +105,9 @@
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-13T04:30:52",
+    "last_attempt": "2026-06-13T06:38:42",
     "last_error": {
-      "reason": "browser_crash",
+      "reason": "registration_page_not_found",
       "proxy_used": null
     }
   },

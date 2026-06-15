@@ -1103,13 +1103,12 @@ class SelectorFinder:
                 # имеет класс "limited" (XenForo) или текст <p class="explain">
                 # содержит слово из honeypot_keywords (универсальная проверка)
                 try:
-                    js_selector: str = json.dumps(selector)
-                    hp_response: dict = await self.page.execute_script(
-                        f"var el=document.querySelector({js_selector});"
-                        f"if(!el)return null;"
-                        f"var p=el.closest('dl,div,li,td');"
-                        f"return JSON.stringify({{parentClass:p?p.className:'',"
-                        f"explainText:p?(p.querySelector('.explain')||{{textContent:''}}).textContent||'':''}});"
+                    hp_response: dict = await element.execute_script(
+                        'var el = this;'
+                        'var p = el.closest("dl,div,li,td");'
+                        'return JSON.stringify({parentClass: p ? p.className : "",'
+                        'explainText: p ? (p.querySelector(".explain") || {textContent: ""}).textContent || "" : ""});',
+                        return_by_value=True,
                     )
                     hp_raw: str | None = hp_response.get("result", {}).get("result", {}).get("value")
                     if hp_raw:
@@ -1130,39 +1129,39 @@ class SelectorFinder:
                 # Пропускаем поля скрытые через родителя или помеченные классами
                 # авто-заполнения (OptOut, AutoTimeZone и др. из skip_field_classes)
                 try:
-                    sf_response: dict = await self.page.execute_script(
-                        f"""
-                        var el = document.querySelector({json.dumps(selector)});
-                        if (!el) return null;
-                    
+                    sf_response: dict = await element.execute_script(
+                        """
+                        var el = this;
+
                         // 1. Проверка ВСЕХ родителей на display:none / visibility:hidden
                         // Исправляет баг: closest() останавливался на <td> внутри <tr style="display:none">
                         var p = el.parentElement;
                         var parentDisplay = '';
                         var parentVisibility = '';
-                        while (p && p.tagName !== 'BODY') {{
+                        while (p && p.tagName !== 'BODY') {
                             var cs = window.getComputedStyle(p);
-                            if (cs.display === 'none') {{ parentDisplay = 'none'; break; }}
-                            if (cs.visibility === 'hidden') {{ parentVisibility = 'hidden'; break; }}
+                            if (cs.display === 'none') { parentDisplay = 'none'; break; }
+                            if (cs.visibility === 'hidden') { parentVisibility = 'hidden'; break; }
                             p = p.parentElement;
-                        }}
-                    
+                        }
+
                         // 2. Сбор классов ближайшего контейнера (XenForo skip_field_classes)
                         var container = el.closest('dl,div,li,td,tr,form,section,article');
                         var parentClass = container ? (container.className || '') : '';
-                    
+
                         // 3. Собственные стили элемента
                         var elStyle = window.getComputedStyle(el);
-                    
-                        return JSON.stringify({{
+
+                        return JSON.stringify({
                             parentDisplay: parentDisplay,
                             parentVisibility: parentVisibility,
                             elDisplay: elStyle.display,
                             elVisibility: elStyle.visibility,
                             parentClass: parentClass,
                             elementClass: el.className || ''
-                        }});
-                        """
+                        });
+                        """,
+                        return_by_value=True,
                     )
                     sf_raw: str | None = sf_response.get("result", {}).get("result", {}).get("value")
                     if sf_raw:
@@ -1183,7 +1182,7 @@ class SelectorFinder:
                                 parent_classes_set & skip_field_classes_set
                                 or element_classes_set & skip_field_classes_set
                             )
-    
+
                             # Проверка видимости через computed style (getComputedStyle):
                             # покрывает inline-стили, CSS-классы, скрытие через родителя
                             is_hidden: bool = (
@@ -1193,7 +1192,7 @@ class SelectorFinder:
                                 or el_visibility == "hidden"
                                 or has_skip_class
                             )
-    
+
                             if is_hidden:
                                 # Детальное логирование причины для отладки на разных форумах
                                 hide_reasons: list[str] = []
@@ -1207,7 +1206,7 @@ class SelectorFinder:
                                     hide_reasons.append("el_visibility_hidden")
                                 if has_skip_class:
                                     hide_reasons.append("skip_class")
-    
+
                                 logger.debug(
                                     f"Пропускаем скрытое/авто поле: {selector} "
                                     f"(причины: {', '.join(hide_reasons)})"
