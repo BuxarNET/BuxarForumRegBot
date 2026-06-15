@@ -1631,6 +1631,7 @@ class SelectorFinder:
                     "form_selector": block["form_selector"],
                     "score": block["score"],
                     "template_matches": block.get("template_matches", 0),
+                    "form_element": block["form_element"],  # ← Передаём объект формы дальше
                     **fields,
                     "captcha_indicator": captcha,
                 })
