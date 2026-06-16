@@ -1503,15 +1503,18 @@ class RegistrationController:
             new_data["agree_step"] = {"checkboxes": checkboxes_to_save}
 
         try:
-            await self.template_manager.update_template(
+            updated_template = await self.template_manager.update_template(
                 engine_name=engine_name,
                 new_data=new_data,
             )
-            logger.info(
-                f"Шаблон '{engine_name}' обновлён: "
-                f"полей={list(fields_to_save.keys())}, "
-                f"чекбоксов={len(checkboxes_to_save)}"
-            )
+            if updated_template:
+                logger.info(
+                    f"Шаблон '{engine_name}' обновлён: "
+                    f"полей={list(fields_to_save.keys())}, "
+                    f"чекбоксов={len(checkboxes_to_save)}"
+                )
+            else:
+                logger.warning(f"Не удалось обновить или создать шаблон '{engine_name}'")
         except Exception as e:
             logger.error(
                 f"Не удалось обновить шаблон '{engine_name}': {e}"
@@ -2289,11 +2292,34 @@ class RegistrationController:
                         if already_checked:
                             logger.info(f"Чекбокс '{field_name}' уже отмечен — пропускаем клик")
                         else:
-                            await self.browser.human_click(sel)
-                            logger.info(f"Чекбокс '{field_name}' отмечен: {sel}")
+                            # 🔥 Умный клик: проверка стилей + JS click с fallback на human_click
+                            try:
+                                is_clickable_resp = await element.execute_script(
+                                    "this.scrollIntoView({block: 'center', behavior: 'instant'}); "
+                                    "var s = window.getComputedStyle(this); "
+                                    "return s.display !== 'none' && s.visibility !== 'hidden';",
+                                    return_by_value=True
+                                )
+                                is_clickable = bool(is_clickable_resp.get("result", {}).get("result", {}).get("value", False))
+                            except Exception:
+                                is_clickable = False
+
+                            if is_clickable:
+                                try:
+                                    await element.execute_script("this.click();")
+                                    logger.info(f"Чекбокс '{field_name}' отмечен через JS (обход zero_size): {sel}")
+                                except Exception:
+                                    # Fallback на human_click, если JS клик по какой-то причине не сработал
+                                    await self.browser.human_click(sel)
+                                    logger.info(f"Чекбокс '{field_name}' отмечен через human_click (fallback): {sel}")
+                            else:
+                                # Стандартный human_click для обычных сайтов
+                                await self.browser.human_click(sel)
+                                logger.info(f"Чекбокс '{field_name}' отмечен: {sel}")
+                        
                         filled_fields.append(field_name)  # элемент найден — успех
                         if not is_one_time:
-                            source = custom_field.get("source", "manual")
+                            source = custom_field.get("source", "")
                             new_checkboxes.append((sel, source))  # аккумулятор
                 except Exception as e:
                     logger.warning(f"Не удалось обработать чекбокс '{field_name}' ({sel}): {e}")

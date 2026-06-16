@@ -16,7 +16,8 @@
   },
   "registration_page": {
     "url": [
-      "/register.php"
+      "/register.php",
+      "/register"
     ],
     "form_selector": [
       "form#register",

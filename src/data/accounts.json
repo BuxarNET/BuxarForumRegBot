@@ -1,7 +1,7 @@
 [
   {
     "username": "buxarnet",
-    "email": "buxarnet@gmail.com",
+    "email": "buxarnet@mail.ru",
     "password": "name='USER_BUXARNET'",
     "proxy_id": null,
     "custom_fields": {
@@ -101,13 +101,16 @@
       "referrername": [],
       "confirm_code": [
         "1TQIA"
+      ],
+      "as": [
+        "6957"
       ]
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-13T06:38:42",
+    "last_attempt": "2026-06-16T02:56:10",
     "last_error": {
-      "reason": "registration_page_not_found",
+      "reason": "timeout",
       "proxy_used": null
     }
   },

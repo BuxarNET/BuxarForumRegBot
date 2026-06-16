@@ -559,8 +559,8 @@ class TemplateManager:
         file_path = self.templates_dir / f"{engine_name}.json"
 
         if not file_path.exists():
-            logger.warning(f"Файл шаблона не найден: {file_path}")
-            return None
+            logger.info(f"Файл шаблона не найден: {file_path}. Создаём базовый шаблон на основе default.json")
+            await self.add_template(engine_name)
 
         # Читаем только нужный файл
         try:
