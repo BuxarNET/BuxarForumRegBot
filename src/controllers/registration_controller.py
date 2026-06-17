@@ -2862,12 +2862,34 @@ class RegistrationController:
                 )
                 return "not_found", option_texts
 
-            # Выбираем опцию через JS и отправляем событие change
+            # Выбираем опцию через JS с безопасной обработкой onchange
             opt_value_js = _json.dumps(matched["value"])
             await self.page.execute_script(f"""
-                var el = document.querySelector({selector_js});
-                el.value = {opt_value_js};
-                el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                (function() {{
+                    var el = document.querySelector({selector_js});
+                    if (!el) return;
+
+                    // Сохраняем и удаляем опасные inline-обработчики
+                    // чтобы избежать преждевременной отправки формы
+                    var origOnchange = el.getAttribute('onchange');
+                    var origOninput = el.getAttribute('oninput');
+                    if (origOnchange) {{
+                        el.removeAttribute('onchange');
+                    }}
+                    if (origOninput) {{
+                        el.removeAttribute('oninput');
+                    }}
+
+                    // Устанавливаем значение
+                    el.value = {opt_value_js};
+
+                    // Диспатчим change — inline-обработчиков уже нет,
+                    // addEventListener-обработчики сработают корректно
+                    el.dispatchEvent(new Event('change', {{bubbles: true}}));
+
+                    // Атрибуты НЕ восстанавливаем — форма будет отправлена
+                    // корректно при финальном нажатии submit-кнопки
+                }})();
             """)
             logger.info(
                 f"Поле '{field_name}' выбрана опция: "
