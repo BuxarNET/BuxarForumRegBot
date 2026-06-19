@@ -53,7 +53,7 @@ class SelectorFinder:
             text: Текст для поиска (уже в lower case).
             keywords: Список ключевых слов (уже в lower case).
             word_boundary: True — кастомная граница слова
-                          (_ считается разделителем, [a-zA-Z0-9] — нет),
+                          (_ считается разделителем, [a-zA-Z0-9а-яёА-ЯЁ] — нет),
                           False — поиск подстроки (in).
 
         Returns:
@@ -65,7 +65,7 @@ class SelectorFinder:
         if word_boundary:
             for kw in keywords:
                 # Кастомная граница: _ считается разделителем
-                pattern = rf'(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])'
+                pattern = rf'(?<![a-zA-Z0-9а-яёА-ЯЁ]){re.escape(kw)}(?![a-zA-Z0-9а-яёА-ЯЁ])'
                 if re.search(pattern, text, re.IGNORECASE):
                     return True
             return False
@@ -408,18 +408,36 @@ class SelectorFinder:
                 # Фильтруем видимые поля
                 visible_inputs = []
                 for inp in inputs:
+                    try:
+                        _tab = inp.get_attribute("tabindex")
+                        if _tab is not None and int(str(_tab).strip()) < 0:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
                     style = (inp.get_attribute("style") or "").replace(" ", "")
                     if "display:none" not in style and "visibility:hidden" not in style:
                         visible_inputs.append(inp)
 
                 visible_checkboxes = []
                 for cb in checkboxes:
+                    try:
+                        _tab = cb.get_attribute("tabindex")
+                        if _tab is not None and int(str(_tab).strip()) < 0:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
                     style = (cb.get_attribute("style") or "").replace(" ", "")
                     if "display:none" not in style and "visibility:hidden" not in style:
                         visible_checkboxes.append(cb)
 
                 visible_buttons = []
                 for btn in buttons:
+                    try:
+                        _tab = btn.get_attribute("tabindex")
+                        if _tab is not None and int(str(_tab).strip()) < 0:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
                     style = (btn.get_attribute("style") or "").replace(" ", "")
                     if "display:none" not in style and "visibility:hidden" not in style:
                         visible_buttons.append(btn)

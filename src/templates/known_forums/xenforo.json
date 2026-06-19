@@ -60,7 +60,8 @@
       "#ctrl_agree"
     ],
     "submit_button": [
-      "button[type='submit']"
+      "button[type='submit']",
+      "form#pageLogin input[type='submit']"
     ],
     "captcha_indicator": [
       "iframe[src*='recaptcha']"
@@ -73,6 +74,9 @@
     ],
     "email_label": [
       "Ваше имя или e-mail:"
+    ],
+    "submit_button_label": [
+      "Вход"
     ]
   },
   "custom_fields": [],
