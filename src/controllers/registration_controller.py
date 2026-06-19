@@ -925,11 +925,27 @@ class RegistrationController:
         _dom_cache: dict[str, bool] = {}
 
         async def _exists_in_dom(sel: str) -> bool:
-            """Проверяет наличие элемента в DOM текущей страницы."""
+            """Проверяет наличие элемента в DOM текущей страницы.
+            
+            Дополнительно проверяет tabindex: если элемент имеет tabindex < 0,
+            он считается honeypot-полем и не используется.
+            """
             if sel not in _dom_cache:
                 try:
                     el = await self.page.query(sel, raise_exc=False, timeout=3)
-                    _dom_cache[sel] = el is not None
+                    if el is None:
+                        _dom_cache[sel] = False
+                    else:
+                        # 🔥 Проверка на honeypot: отрицательный tabindex = скрытое поле
+                        try:
+                            tabindex = el.get_attribute("tabindex")
+                            if tabindex is not None and int(str(tabindex).strip()) < 0:
+                                logger.debug(f"DOM-проверка: '{sel}' → honeypot (tabindex={tabindex}) → отсутствующий")
+                                _dom_cache[sel] = False
+                            else:
+                                _dom_cache[sel] = True
+                        except (ValueError, TypeError):
+                            _dom_cache[sel] = True
                 except CommandExecutionTimeout:
                     logger.debug(f"DOM-проверка: '{sel}' → таймаут Pydoll → отсутствующий")
                     _dom_cache[sel] = False
