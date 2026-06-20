@@ -158,15 +158,59 @@ class RegistrationController:
                 }
     
             if not all_blocks:  # [] — пустой список
-                logger.warning("Блоки регистрации не найдены на странице")
-                return {
-                    "success": False,
-                    "message": "Регистрационная форма не найдена",
-                    "reason": "no_form_detected",
-                    "template_used": template.get("name") if template else None,
-                    "screenshot": None,
-                    "form_data": account_data,
-                }
+                logger.warning("Блоки регистрации не найдены на странице — запрашиваем ручное вмешательство")
+    
+                # Запрашиваем ручное открытие формы
+                timeout = self.config.get("MANUAL_FIELD_FILL_TIMEOUT", 120)
+                print("\n" + "=" * 60)
+                print("⚠️  Форма регистрации не найдена автоматически.")
+                print("Пожалуйста, откройте форму регистрации вручную в браузере")
+                print("(например, нажмите кнопку «Зарегистрироваться»)")
+                print("и нажмите Enter, чтобы продолжить.")
+                print(f"Ожидание: {timeout} секунд.")
+                print("=" * 60)
+    
+                try:
+                    await asyncio.wait_for(
+                        asyncio.get_running_loop().run_in_executor(
+                            None, input, ">>> "
+                        ),
+                        timeout=timeout,
+                    )
+    
+                    # После ручного открытия ждём загрузку страницы
+                    page_load_wait: float = self.config.get("PAGE_LOAD_WAIT", 5.0)
+                    await asyncio.sleep(page_load_wait)
+    
+                    # Повторно анализируем страницу
+                    all_blocks = await self.selector_finder.analyze_current_page(template=template)
+    
+                    if not all_blocks:
+                        logger.warning("После ручного вмешательства блоки всё ещё не найдены")
+                        screenshot = await self._take_screenshot("no_form_manual", account_data.get("username"))
+                        return {
+                            "success": False,
+                            "message": "Регистрационная форма не найдена даже после ручного открытия",
+                            "reason": "no_form_detected",
+                            "template_used": template.get("name") if template else None,
+                            "screenshot": screenshot,
+                            "form_data": account_data,
+                        }
+    
+                    logger.info(f"✅ После ручного вмешательства найдено блоков: {len(all_blocks)}")
+                    # Продолжаем работу с найденными блоками
+    
+                except asyncio.TimeoutError:
+                    logger.warning(f"Таймаут ожидания ручного открытия формы ({timeout}с)")
+                    screenshot = await self._take_screenshot("manual_timeout", account_data.get("username"))
+                    return {
+                        "success": False,
+                        "message": "Таймаут ожидания ручного открытия формы",
+                        "reason": "manual_timeout",
+                        "template_used": template.get("name") if template else None,
+                        "screenshot": screenshot,
+                        "form_data": account_data,
+                    }
 
             logger.info(f"Найдено блоков для перебора: {len(all_blocks)}")
             for _i, _b in enumerate(all_blocks):

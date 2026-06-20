@@ -32,7 +32,8 @@
         "01.09.1990"
       ],
       "dob_month": [
-        "9"
+        "9",
+        "Октябрь"
       ],
       "dob_day": [
         "1"
@@ -40,7 +41,9 @@
       "dob_year": [
         "1990"
       ],
-      "phone": null,
+      "phone": [
+        "+79046003636"
+      ],
       "website": [
         "https://intfaq.ru/"
       ],
@@ -110,11 +113,23 @@
       "custom_fields[vashe_avto]": [
         "Газ"
       ],
-      "custom_fields[vk]": []
+      "custom_fields[vk]": [],
+      "nospam": [
+        "3355"
+      ],
+      "imagestamp": [
+        "PMEW4Y"
+      ],
+      "showbirthday": [
+        "1"
+      ],
+      "frontend_userregistrationform[verifycode]": [
+        "5431"
+      ]
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-19T23:56:38",
+    "last_attempt": "2026-06-20T18:00:47",
     "last_error": {
       "reason": "no_form_detected",
       "proxy_used": null
