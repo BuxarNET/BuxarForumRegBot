@@ -17,7 +17,8 @@
   "registration_page": {
     "url": [
       "/register",
-      "/login/"
+      "/login/",
+      "/register/"
     ],
     "form_selector": [
       "form#register-form",
@@ -27,7 +28,8 @@
       ],
       [
         "input"
-      ]
+      ],
+      "form[action='/register/register']"
     ]
   },
   "register_step": {
@@ -42,26 +44,31 @@
   },
   "fields": {
     "username": [
-      "input[name='username']"
+      "input[name='username']",
+      "#_xfUid-2-1781854498"
     ],
     "email": [
       "input[name='email']",
-      "#ctrl_pageLogin_login"
+      "#ctrl_pageLogin_login",
+      "#_xfUid-3-1781854498"
     ],
     "password": [
       "input[name='password']",
-      "#ctrl_pageLogin_password"
+      "#ctrl_pageLogin_password",
+      "#_xfUid-4-1781854498"
     ],
     "confirm_password": [
       "input[name='password_confirm']"
     ],
     "agree_checkbox": [
       "input[name='agree']",
-      "#ctrl_agree"
+      "#ctrl_agree",
+      "input[name='accept']"
     ],
     "submit_button": [
       "button[type='submit']",
-      "form#pageLogin input[type='submit']"
+      "form#pageLogin input[type='submit']",
+      "#js-signUpButton"
     ],
     "captcha_indicator": [
       "iframe[src*='recaptcha']"
@@ -73,10 +80,21 @@
       "Нет, зарегистрироваться сейчас."
     ],
     "email_label": [
-      "Ваше имя или e-mail:"
+      "Ваше имя или e-mail:",
+      "Электронная почта"
     ],
     "submit_button_label": [
-      "Вход"
+      "Вход",
+      "(Пожалуйста, подождите 10 сек.)"
+    ],
+    "username_label": [
+      "Имя пользователя"
+    ],
+    "password_label": [
+      "Пароль"
+    ],
+    "custom_fields[vashe_avto]": [
+      "#_xfUid-8-1781854498"
     ]
   },
   "custom_fields": [],

@@ -60,6 +60,12 @@
     "submit_button_label": [
       "Регистрация",
       "Регистрация завершена"
+    ],
+    "username_label": [
+      "Придумайте себе имя на форуме"
+    ],
+    "confirm_password_label": [
+      "Подтвердите пароль:"
     ]
   },
   "custom_fields": [],

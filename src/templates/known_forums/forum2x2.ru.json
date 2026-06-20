@@ -3,24 +3,45 @@
   "domain": "forum2x2.ru",
   "engine": "forum2x2.ru",
   "registration_page": {
-    "url": [],
-    "form_selector": ["form"]
+    "url": [
+      "/register"
+    ],
+    "form_selector": [
+      "form",
+      "#frmAgreement"
+    ]
   },
   "agree_step": {
     "checkboxes": [
       "input[name='agreement']",
       "input[name='privacy']"
     ],
-    "submit_button": ["input[type='submit'].cgu-buttons"]
+    "submit_button": [
+      "input[type='submit'].cgu-buttons"
+    ]
   },
   "fields": {
-    "username": ["input[name='username']"],
-    "email": ["input[name='email']"],
-    "password": ["input[name='password']"],
+    "username": [
+      "input[name='username']"
+    ],
+    "email": [
+      "input[name='email']"
+    ],
+    "password": [
+      "input[name='password']"
+    ],
     "confirm_password": [],
-    "agree_checkbox": [],
-    "submit_button": ["input[name='submit']"],
-    "captcha_indicator": []
+    "agree_checkbox": [
+      "#frmAgreeChkPrivacy"
+    ],
+    "submit_button": [
+      "input[name='submit']",
+      "form#frmAgreement input[type='submit']"
+    ],
+    "captcha_indicator": [],
+    "submit_button_label": [
+      "Я согласен с этими условиями"
+    ]
   },
   "custom_fields": [],
   "success_indicators": [

@@ -63,7 +63,8 @@
       "s": [],
       "qa_answer": [
         "alex1966",
-        "8115"
+        "8115",
+        "Двенадцать,"
       ],
       "humanverify[input]": [
         "дороги"
@@ -96,26 +97,26 @@
       "hideonline": [],
       "popup_pm": [],
       "emailconfirm": [
-        "buxarnet@gmail.com"
+        "buxarnet@mail.ru"
       ],
       "referrername": [],
-      "confirm_code": [
-        "1TQIA",
-        "42N5"
-      ],
       "as": [
         "6957"
       ],
       "pf_fio": [
         "BuxarNET"
       ],
-      "pf_phpbb_interests": []
+      "pf_phpbb_interests": [],
+      "custom_fields[vashe_avto]": [
+        "Газ"
+      ],
+      "custom_fields[vk]": []
     },
     "status": "pending",
     "attempts": 0,
-    "last_attempt": "2026-06-17T03:40:30",
+    "last_attempt": "2026-06-19T23:56:38",
     "last_error": {
-      "reason": "page_unavailable",
+      "reason": "no_form_detected",
       "proxy_used": null
     }
   },

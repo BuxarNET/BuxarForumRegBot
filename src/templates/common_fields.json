@@ -7,11 +7,11 @@
   "submit_keywords": [
     "register", "sign up", "create account", "submit", "join", "continue", "next", "proceed",
     "зарегистрироваться", "зарегистрир", "продолжить", "далее", "отправить", "подтвердить",
-    "signup", "enroll", "complete", "finish", "create", "начать", "вперёд", "ок", "согласен", "Создать аккаунт"
+    "signup", "enroll", "complete", "finish", "create", "начать", "вперёд", "ок", "согласен", "Создать аккаунт", "Я соглашаюсь"
   ],
   "username_keywords": [
     "user", "login", "nick", "username", "handle", "псевдоним",
-    "логин", "никнейм", "пользователь", "юзер", "ник", "nickname"
+    "логин", "никнейм", "пользователь", "юзер", "ник", "nickname", "имя пользователя"
   ],
   "email_keywords": [
     "email", "mail", "e-mail", "почта", "эл.почта", "электронная", "емейл"
@@ -87,7 +87,7 @@
   "one_time_field_keywords": [
     "captcha", "imagestring", "image_string", "seccode",
     "answer", "question", "secret", "код", "code", "q_and_a", "humanverify",
-    "balls", "phpbb_balls", "очистите", "спам", "анти-спам", "antispam"
+    "balls", "phpbb_balls", "очистите", "спам", "анти-спам", "antispam", "pf_phpbb_interests", "confirm_code"
   ],
   "honeypot_keywords": [
     "оставьте это поле пустым",

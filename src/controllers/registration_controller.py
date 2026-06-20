@@ -1033,7 +1033,6 @@ class RegistrationController:
                 continue
 
             if block_val:
-                # Новый вариант — ни селектор ни label не совпали с шаблоном
                 source = "common_fields" if block_label else "manual"
                 selectors[key] = block_val
                 selectors[f"{key}_label"] = block_label
@@ -1041,7 +1040,18 @@ class RegistrationController:
                 logger.debug(f"Поле '{key}' — новый вариант → source={source}")
                 continue
 
-            # Поле не найдено в блоке — последний шанс: шаблонный селектор в DOM
+            # Поля ввода данных пользователя — только из блока, глобальный поиск запрещён.
+            # Эти поля всегда принадлежат своей форме; глобальный поиск находит чужие формы
+            # (логин, восстановление пароля), что приводит к заполнению неверных полей.
+            if key in {"username", "email", "confirm_email", "password", "confirm_password"}:
+                logger.debug(
+                    f"Поле '{key}' — не найдено в блоке, глобальный поиск запрещён → пропускаем"
+                )
+                continue
+
+            # Поле не найдено в блоке — последний шанс: шаблонный селектор в DOM.
+            # Допустимо только для agree_checkbox, captcha_indicator, submit_button,
+            # register_radio — эти элементы реально встречаются вне тега <form>.
             if tmpl_sel and await _exists_in_dom(tmpl_sel):
                 selectors[key] = tmpl_sel
                 selectors[f"{key}_label"] = ""
