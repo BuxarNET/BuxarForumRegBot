@@ -113,6 +113,8 @@ class SelectorFinder:
                 "type": (element.get_attribute("type") or "").lower(),
                 "name": (element.get_attribute("name") or "").lower(),
                 "id": (element.get_attribute("id") or "").lower(),
+                "action": (element.get_attribute("action") or "").lower(),
+                "method": (element.get_attribute("method") or "").lower(),
                 "placeholder": (element.get_attribute("placeholder") or "").lower(),
                 "value": (element.get_attribute("value") or ""),
                 "tagName": tag_name.lower(),
@@ -120,7 +122,7 @@ class SelectorFinder:
             }
         except Exception as e:
             logger.warning(f"Ошибка получения атрибутов: {e}")
-            return {"type": "", "name": "", "id": "", "placeholder": "", "value": "", "tagName": "input", "label": ""}
+            return {"type": "", "name": "", "id": "", "action": "", "method": "", "placeholder": "", "value": "", "tagName": "input", "label": ""}
 
     def _generate_css_selector(
         self,
@@ -344,6 +346,97 @@ class SelectorFinder:
 
             except Exception as e:
                 logger.warning(f"Ошибка обработки формы: {e}")
+                
+        # --- Шаг 1.5: поиск форм внутри <iframe> ---
+        # Запускается если кандидатов нет или все они получили штраф (формы поиска/логина).
+        # Pydoll автоматически проставляет _iframe_context на элементы из iframe,
+        # поэтому scoring, identify_fields и _query_in_context работают без изменений.
+        _iframe_skip_src = {
+            "recaptcha", "hcaptcha", "turnstile", "smartcaptcha",
+            "googlesyndication", "adsbygoogle", "doubleclick",
+            "facebook", "vk.com", "ok.ru",
+        }
+        _нет_нормальных_кандидатов = (
+            not candidates
+            or all(c.get("login_form_penalty") for c in candidates)
+        )
+        if _нет_нормальных_кандидатов:
+            try:
+                iframes = await self.page.query(
+                    "iframe", find_all=True, timeout=0, raise_exc=False
+                ) or []
+                logger.debug(
+                    f"Шаг 1.5: кандидатов без штрафа нет — "
+                    f"ищем формы в iframe (найдено iframe: {len(iframes)})"
+                )
+                for iframe_el in iframes:
+                    try:
+                        src = (iframe_el.get_attribute("src") or "").lower()
+                        if any(kw in src for kw in _iframe_skip_src):
+                            logger.debug(f"Пропускаем служебный iframe: src='{src[:80]}'")
+                            continue
+
+                        iframe_forms = await iframe_el.query(
+                            "form", find_all=True, timeout=0, raise_exc=False
+                        ) or []
+                        if iframe_forms:
+                            logger.info(
+                                f"✅ Найдено форм в iframe: {len(iframe_forms)} "
+                                f"(src='{src[:60]}')"
+                            )
+                        else:
+                            logger.debug(f"iframe[src='{src[:80]}']: форм не найдено")
+
+                        for form in iframe_forms:
+                            try:
+                                attrs = self._get_element_attrs(form)
+                                action = attrs.get("action", "")
+                                name = attrs.get("name", "")
+                                form_id = attrs.get("id", "")
+                                selector = self._generate_css_selector(form)
+
+                                login_form_penalty = False
+                                if self._keyword_match(action, skip_action_kw):
+                                    logger.debug(
+                                        f"[iframe][{selector}] Штраф -50 по action='{action}'"
+                                    )
+                                    login_form_penalty = True
+                                elif self._keyword_match(name, skip_name_kw):
+                                    logger.debug(
+                                        f"[iframe][{selector}] Штраф -50 по name='{name}'"
+                                    )
+                                    login_form_penalty = True
+                                elif self._keyword_match(form_id, skip_name_kw):
+                                    logger.debug(
+                                        f"[iframe][{selector}] Штраф -50 по id='{form_id}'"
+                                    )
+                                    login_form_penalty = True
+
+                                candidates.append({
+                                    "element": form,
+                                    "selector": selector,
+                                    "is_form": True,
+                                    "login_form_penalty": login_form_penalty,
+                                })
+
+                                if not login_form_penalty:
+                                    logger.info(
+                                        f"Найдена форма регистрации в iframe — "
+                                        f"прекращаем поиск"
+                                    )
+                                    break
+
+                            except Exception as e:
+                                logger.warning(f"Ошибка обработки формы из iframe: {e}")
+
+                        if candidates and not candidates[-1].get("login_form_penalty"):
+                            break
+
+                    except Exception as e:
+                        logger.warning(f"Ошибка обработки iframe: {e}")
+
+            except Exception as e:
+                logger.warning(f"Ошибка поиска форм в iframe: {e}")
 
         # --- Шаг 2: собираем <div> с полями (только если форм нет или мало) ---
         # Всегда ищем div-блоки — они могут содержать нужные поля не в <form>
